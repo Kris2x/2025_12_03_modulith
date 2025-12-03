@@ -18,12 +18,31 @@ doctrine:
             Doctrine\DBAL\Platforms\PostgreSQLPlatform: identity
         auto_mapping: true
         mappings:
-            App:
+            Cart:
                 type: attribute
-                is_bundle: false
-                dir: '%kernel.project_dir%/src/Entity'
-                prefix: 'App\Entity'
-                alias: App
+                dir: '%kernel.project_dir%/src/Cart/Entity'
+                prefix: 'App\Cart\Entity'
+                alias: Cart
+            Catalog:
+                type: attribute
+                dir: '%kernel.project_dir%/src/Catalog/Entity'
+                prefix: 'App\Catalog\Entity'
+                alias: Catalog
+            Customer:
+                type: attribute
+                dir: '%kernel.project_dir%/src/Customer/Entity'
+                prefix: 'App\Customer\Entity'
+                alias: Customer
+            Inventory:
+                type: attribute
+                dir: '%kernel.project_dir%/src/Inventory/Entity'
+                prefix: 'App\Inventory\Entity'
+                alias: Inventory
+            Order:
+                type: attribute
+                dir: '%kernel.project_dir%/src/Order/Entity'
+                prefix: 'App\Order\Entity'
+                alias: Order
         controller_resolver:
             auto_mapping: false
 

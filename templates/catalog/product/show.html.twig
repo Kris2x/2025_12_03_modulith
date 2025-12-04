@@ -1,0 +1,15 @@
+{% extends 'base.html.twig' %}
+
+  {% block body %}
+    <h1>Produkt</h1>
+
+    <ul>
+      <li>Nazwa: {{ product.name }}</li>
+      <li>Opis: {{ product.description }}</li>
+      <li>Cena: {{ product.price }} PLN</li>
+    </ul>
+
+    <p>
+      <a href="{{ path('catalog_product_index') }}">Powrót do listy produktów</a>
+    </p>
+  {% endblock %}

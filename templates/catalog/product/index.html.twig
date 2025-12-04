@@ -2,9 +2,13 @@
 
   {% block body %}
     <h1>Produkty</h1>
+    <p>
+      <a href="{{ path('catalog_product_create') }}">Utwórz nowy produkt</a>
+    </p>
     <ul>
       {% for product in products %}
-        <li>{{ product.name }} - {{ product.price }} PLN</li>
+        <li>{{ product.name }} - {{ product.price }} PLN <a href="{{ path('catalog_product_show', {id: product.id}) }}">Pokaz</a>
+        </li>
       {% else %}
         <li>Brak produktów</li>
       {% endfor %}

@@ -36,4 +36,9 @@ class StockService
 
     return $stock && $stock->getQuantity() >= $quantity;
   }
+
+  public function save(StockItem $stockItem)
+  {
+    $this->em->flush();
+  }
 }

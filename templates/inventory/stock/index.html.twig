@@ -1,0 +1,34 @@
+{% extends 'base.html.twig' %}
+
+  {% block title %}Stan magazynowy{% endblock %}
+
+  {% block body %}
+    <h1>Stan magazynowy</h1>
+
+    <table>
+      <thead>
+      <tr>
+        <th>ID</th>
+        <th>Product ID</th>
+        <th>Ilość</th>
+        <th>Akcje</th>
+      </tr>
+      </thead>
+      <tbody>
+      {% for item in stockItems %}
+        <tr>
+          <td>{{ item.id }}</td>
+          <td>{{ productNames[item.productId] ?? 'Nieznany' }} (ID: {{ item.productId }})</td>
+          <td>{{ item.quantity }}</td>
+          <td>
+            <a href="{{ path('inventory_stock_edit', {id: item.id}) }}">Edytuj</a>
+          </td>
+        </tr>
+      {% else %}
+        <tr>
+          <td colspan="4">Brak pozycji magazynowych</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  {% endblock %}

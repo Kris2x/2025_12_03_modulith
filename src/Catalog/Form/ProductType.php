@@ -20,6 +20,12 @@ class ProductType extends AbstractType
       ->add('name', TextType::class, [
         'label' => 'Nazwa produktu',
       ])
+      ->add('category', EntityType::class, [
+        'label' => 'Kategoria',
+        'class' => Category::class,
+        'choice_label' => 'name',
+        'placeholder' => 'Wybierz kategorię',
+      ])
       ->add('price', MoneyType::class, [
         'label' => 'Cena',
         'currency' => 'PLN',
@@ -27,12 +33,6 @@ class ProductType extends AbstractType
       ->add('description', TextareaType::class, [
         'label' => 'Opis',
         'required' => false,
-      ])
-      ->add('category', EntityType::class, [
-        'label' => 'Kategoria',
-        'class' => Category::class,
-        'choice_label' => 'name',
-        'placeholder' => 'Wybierz kategorię',
       ]);
   }
 

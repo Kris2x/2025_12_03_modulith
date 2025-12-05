@@ -1,0 +1,19 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Nowa kategoria{% endblock %}
+
+{% block body %}
+<div class="page-header">
+    <h1>Nowa kategoria</h1>
+    <div class="btn-group">
+        <a href="{{ path('catalog_category_index') }}" class="btn btn-secondary">← Anuluj</a>
+    </div>
+</div>
+
+<div class="section">
+    {{ form_start(form) }}
+        {{ form_widget(form) }}
+        <button type="submit" class="btn btn-success">Utwórz kategorię</button>
+    {{ form_end(form) }}
+</div>
+{% endblock %}

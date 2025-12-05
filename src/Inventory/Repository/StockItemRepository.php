@@ -17,4 +17,14 @@ class StockItemRepository extends ServiceEntityRepository
   {
     return $this->findOneBy(['productId' => $productId]);
   }
+
+  public function removeByProductId(int $productId): int
+  {
+    return $this->createQueryBuilder('si')
+      ->delete()
+      ->where('si.productId = :productId')
+      ->setParameter('productId', $productId)
+      ->getQuery()
+      ->execute();
+  }
 }

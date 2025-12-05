@@ -1,0 +1,23 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Edycja kategorii: {{ category.name }}{% endblock %}
+
+{% block body %}
+<div class="page-header">
+    <h1>Edycja kategorii</h1>
+    <div class="btn-group">
+        <a href="{{ path('catalog_category_index') }}" class="btn btn-secondary">← Anuluj</a>
+    </div>
+</div>
+
+{% for flash in app.flashes('success') %}
+    <div class="alert alert-success">{{ flash }}</div>
+{% endfor %}
+
+<div class="section">
+    {{ form_start(form) }}
+        {{ form_widget(form) }}
+        <button type="submit" class="btn btn-success">Zapisz zmiany</button>
+    {{ form_end(form) }}
+</div>
+{% endblock %}

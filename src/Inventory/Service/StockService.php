@@ -41,4 +41,9 @@ class StockService
   {
     $this->em->flush();
   }
+
+  public function removeByProductId(int $productId): int
+  {
+    return $this->stockItemRepository->removeByProductId($productId);
+  }
 }

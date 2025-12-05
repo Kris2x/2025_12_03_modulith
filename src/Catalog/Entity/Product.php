@@ -24,6 +24,7 @@ class Product
   private ?string $description = null;
 
   #[ORM\ManyToOne(targetEntity: Category::class)]
+  #[ORM\JoinColumn(onDelete: 'SET NULL')]
   private ?Category $category = null;
 
   public function getId(): ?int

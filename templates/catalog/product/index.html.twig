@@ -1,16 +1,34 @@
 {% extends 'base.html.twig' %}
 
-  {% block body %}
+{% block title %}Produkty{% endblock %}
+
+{% block body %}
+<div class="page-header">
     <h1>Produkty</h1>
-    <p>
-      <a href="{{ path('catalog_product_create') }}">Utwórz nowy produkt</a>
-    </p>
-    <ul>
-      {% for product in products %}
-        <li>{{ product.name }} - {{ product.price }} PLN <a href="{{ path('catalog_product_show', {id: product.id}) }}">Pokaz</a>
-        </li>
-      {% else %}
-        <li>Brak produktów</li>
-      {% endfor %}
-    </ul>
-  {% endblock %}
+    <a href="{{ path('catalog_product_create') }}" class="btn btn-success">+ Dodaj produkt</a>
+</div>
+
+{% for flash in app.flashes('success') %}
+    <div class="alert alert-success">{{ flash }}</div>
+{% endfor %}
+
+{% if products|length > 0 %}
+    <div class="product-grid">
+        {% for product in products %}
+            <a href="{{ path('catalog_product_show', {id: product.id}) }}" class="product-card">
+                <h3>{{ product.name }}</h3>
+                <div class="product-category">{{ product.category ? product.category.name : 'Brak kategorii' }}</div>
+                {% if product.description %}
+                    <p class="description">{{ product.description|slice(0, 100) }}{% if product.description|length > 100 %}...{% endif %}</p>
+                {% endif %}
+                <div class="price">{{ product.price }} PLN</div>
+            </a>
+        {% endfor %}
+    </div>
+{% else %}
+    <div class="empty-state">
+        <p>Brak produktów w katalogu</p>
+        <a href="{{ path('catalog_product_create') }}" class="btn btn-primary">Dodaj pierwszy produkt</a>
+    </div>
+{% endif %}
+{% endblock %}

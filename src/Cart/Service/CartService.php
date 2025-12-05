@@ -5,6 +5,7 @@ namespace App\Cart\Service;
 use App\Cart\Entity\Cart;
 use App\Cart\Entity\CartItem;
 use App\Cart\Repository\CartRepository;
+use App\Cart\Repository\CartItemRepository;
 use App\Cart\Port\CartProductProviderInterface;
 use Doctrine\ORM\EntityManagerInterface;
 use InvalidArgumentException;
@@ -13,6 +14,7 @@ class CartService
 {
   public function __construct(
     private CartRepository $cartRepository,
+    private CartItemRepository $cartItemRepository,
     private EntityManagerInterface $em,
     private CartProductProviderInterface $priceProvider,
   ) {}
@@ -97,5 +99,25 @@ class CartService
     }
 
     return $this->priceProvider->getProductNames($productIds);
+  }
+
+  public function updateItemQuantity(Cart $cart, int $productId, int $quantity): void
+  {
+    foreach ($cart->getItems() as $item) {
+      if ($item->getProductId() === $productId) {
+        if ($quantity <= 0) {
+          $cart->removeItem($item);
+        } else {
+          $item->setQuantity($quantity);
+        }
+        $this->em->flush();
+        return;
+      }
+    }
+  }
+
+  public function removeItemsByProductId(int $productId): int
+  {
+    return $this->cartItemRepository->removeByProductId($productId);
   }
 }

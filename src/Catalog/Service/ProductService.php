@@ -6,6 +6,7 @@ use App\Catalog\Entity\Product;
 use App\Catalog\Repository\ProductRepository;
 use Doctrine\ORM\EntityManagerInterface;
 use App\Catalog\Event\ProductCreatedEvent;
+use App\Catalog\Event\ProductDeletedEvent;
 use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
 
 class ProductService
@@ -38,5 +39,21 @@ class ProductService
   public function getAllProducts(): array
   {
     return $this->productRepository->findAll();
+  }
+
+  public function updateProduct(Product $product): void
+  {
+    $this->em->flush();
+  }
+
+  public function deleteProduct(Product $product): void
+  {
+    $productId = $product->getId();
+
+    $this->em->remove($product);
+    $this->em->flush();
+
+    // Dispatch event po usunięciu
+    $this->dispatcher->dispatch(new ProductDeletedEvent($productId));
   }
 }

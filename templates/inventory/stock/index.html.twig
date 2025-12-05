@@ -1,34 +1,50 @@
 {% extends 'base.html.twig' %}
 
-  {% block title %}Stan magazynowy{% endblock %}
+{% block title %}Magazyn{% endblock %}
 
-  {% block body %}
-    <h1>Stan magazynowy</h1>
+{% block body %}
+<h1>📦 Stan magazynowy</h1>
 
-    <table>
-      <thead>
-      <tr>
-        <th>ID</th>
-        <th>Product ID</th>
-        <th>Ilość</th>
-        <th>Akcje</th>
-      </tr>
-      </thead>
-      <tbody>
-      {% for item in stockItems %}
-        <tr>
-          <td>{{ item.id }}</td>
-          <td>{{ productNames[item.productId] ?? 'Nieznany' }} (ID: {{ item.productId }})</td>
-          <td>{{ item.quantity }}</td>
-          <td>
-            <a href="{{ path('inventory_stock_edit', {id: item.id}) }}">Edytuj</a>
-          </td>
-        </tr>
-      {% else %}
-        <tr>
-          <td colspan="4">Brak pozycji magazynowych</td>
-        </tr>
-      {% endfor %}
-      </tbody>
+{% for flash in app.flashes('success') %}
+    <div class="alert alert-success">{{ flash }}</div>
+{% endfor %}
+
+{% if stockItems|length > 0 %}
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Produkt</th>
+                <th>Ilość w magazynie</th>
+                <th>Status</th>
+                <th>Akcje</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in stockItems %}
+                <tr>
+                    <td><strong>{{ productNames[item.productId] ?? 'Nieznany' }}</strong></td>
+                    <td>{{ item.quantity }} szt.</td>
+                    <td>
+                        {% if item.quantity == 0 %}
+                            <span class="badge" style="background: #dc3545; color: white;">Brak</span>
+                        {% elseif item.quantity < 10 %}
+                            <span class="badge" style="background: #ffc107; color: #333;">Niski stan</span>
+                        {% else %}
+                            <span class="badge" style="background: #28a745; color: white;">OK</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <a href="{{ path('inventory_stock_edit', {id: item.id}) }}" class="btn btn-warning btn-sm">Edytuj stan</a>
+                    </td>
+                </tr>
+            {% endfor %}
+        </tbody>
     </table>
-  {% endblock %}
+{% else %}
+    <div class="empty-state">
+        <p>📦 Brak pozycji magazynowych</p>
+        <p style="font-size: 0.9rem;">Dodaj produkty w katalogu - stany magazynowe zostaną utworzone automatycznie.</p>
+        <a href="{{ path('catalog_product_create') }}" class="btn btn-primary">Dodaj produkt</a>
+    </div>
+{% endif %}
+{% endblock %}

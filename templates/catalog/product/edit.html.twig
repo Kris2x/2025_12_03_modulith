@@ -1,12 +1,12 @@
 {% extends 'base.html.twig' %}
 
-{% block title %}Edytuj stan: {{ productName }}{% endblock %}
+{% block title %}Edytuj: {{ product.name }}{% endblock %}
 
 {% block body %}
 <div class="page-header">
-    <h1>Edytuj stan magazynowy</h1>
+    <h1>Edytuj produkt</h1>
     <div class="btn-group">
-        <a href="{{ path('inventory_stock_index') }}" class="btn btn-secondary">← Powrót</a>
+        <a href="{{ path('catalog_product_show', {id: product.id}) }}" class="btn btn-secondary">← Anuluj</a>
     </div>
 </div>
 
@@ -15,9 +15,6 @@
 {% endfor %}
 
 <div class="section">
-    <h3 class="section-title">{{ productName }}</h3>
-    <p>Aktualny stan: <strong>{{ stockItem.quantity }} szt.</strong></p>
-
     {{ form_start(form) }}
         {{ form_widget(form) }}
         <button type="submit" class="btn btn-primary">Zapisz zmiany</button>

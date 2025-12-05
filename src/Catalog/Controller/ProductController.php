@@ -63,4 +63,44 @@ class ProductController extends AbstractController
       'product' => $product,
     ]);
   }
+
+  #[Route('/{id}/edit', name: 'edit', methods: ['GET', 'POST'])]
+  public function edit(int $id, Request $request): Response
+  {
+    $product = $this->productService->getProduct($id);
+
+    if (!$product) {
+      throw $this->createNotFoundException();
+    }
+
+    $form = $this->createForm(ProductType::class, $product);
+    $form->handleRequest($request);
+
+    if ($form->isSubmitted() && $form->isValid()) {
+      $this->productService->updateProduct($product);
+      $this->addFlash('success', 'Produkt zaktualizowany');
+
+      return $this->redirectToRoute('catalog_product_show', ['id' => $product->getId()]);
+    }
+
+    return $this->render('catalog/product/edit.html.twig', [
+      'product' => $product,
+      'form' => $form,
+    ]);
+  }
+
+  #[Route('/{id}/delete', name: 'delete', methods: ['POST'])]
+  public function delete(int $id, Request $request): Response
+  {
+    $product = $this->productService->getProduct($id);
+
+    if (!$product) {
+      throw $this->createNotFoundException();
+    }
+
+    $this->productService->deleteProduct($product);
+    $this->addFlash('success', 'Produkt usunięty');
+
+    return $this->redirectToRoute('catalog_product_index');
+  }
 }

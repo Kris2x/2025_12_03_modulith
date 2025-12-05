@@ -84,4 +84,19 @@ class CartController extends AbstractController
 
         return $this->redirectToRoute('cart_index');
     }
+
+    #[Route('/update/{productId}', name: 'update', methods: ['POST'])]
+    public function update(Request $request, int $productId): Response
+    {
+        $cartId = $request->getSession()->get('cart_id');
+        $cart = $cartId ? $this->cartService->findCart($cartId) : null;
+
+        if ($cart) {
+            $quantity = (int) $request->request->get('quantity', 1);
+            $this->cartService->updateItemQuantity($cart, $productId, $quantity);
+            $this->addFlash('success', 'Ilość zaktualizowana');
+        }
+
+        return $this->redirectToRoute('cart_index');
+    }
 }

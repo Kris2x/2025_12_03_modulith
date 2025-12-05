@@ -1,11 +1,19 @@
 {% extends 'base.html.twig' %}
 
+{% block title %}Nowy produkt{% endblock %}
+
 {% block body %}
+<div class="page-header">
+    <h1>Nowy produkt</h1>
+    <div class="btn-group">
+        <a href="{{ path('catalog_product_index') }}" class="btn btn-secondary">← Anuluj</a>
+    </div>
+</div>
 
-  {{ form_start(form) }}
-      {{ form_widget(form) }}
-      <button class="btn">Create Product</button>
-  {{ form_end(form) }}
-
+<div class="section">
+    {{ form_start(form) }}
+        {{ form_widget(form) }}
+        <button type="submit" class="btn btn-success">Utwórz produkt</button>
+    {{ form_end(form) }}
+</div>
 {% endblock %}
-

@@ -4,9 +4,9 @@ namespace App\Inventory\Controller;
 
 use App\Inventory\Entity\StockItem;
 use App\Inventory\Form\StockItemType;
-use App\Inventory\Service\ProductCatalogInterface;
-use App\Inventory\Service\StockService;
+use App\Inventory\Port\ProductCatalogInterface;
 use App\Inventory\Repository\StockItemRepository;
+use App\Inventory\Service\StockService;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;

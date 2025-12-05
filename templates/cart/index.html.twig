@@ -1,0 +1,55 @@
+{% extends 'base.html.twig' %}
+
+  {% block title %}Koszyk{% endblock %}
+
+  {% block body %}
+    <h1>Koszyk</h1>
+
+    {% for flash in app.flashes('success') %}
+      <div class="alert alert-success">{{ flash }}</div>
+    {% endfor %}
+
+    {% if cart and cart.items|length > 0 %}
+      <table class="table">
+        <thead>
+        <tr>
+          <th>Produkt</th>
+          <th>Cena</th>
+          <th>Ilość</th>
+          <th>Suma</th>
+          <th>Akcje</th>
+        </tr>
+        </thead>
+        <tbody>
+        {% for item in cart.items %}
+          <tr>
+            <td>{{ productNames[item.productId] ?? 'Nieznany produkt' }}</td>
+            <td>{{ item.priceAtAdd }} zł</td>
+            <td>{{ item.quantity }}</td>
+            <td>{{ (item.priceAtAdd * item.quantity)|number_format(2) }} zł</td>
+            <td>
+              <form action="{{ path('cart_remove', {productId: item.productId}) }}" method="post" style="display:inline" data-turbo="false">
+                <button type="submit" class="btn btn-danger btn-sm">Usuń</button>
+              </form>
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+        <tfoot>
+        <tr>
+          <th colspan="3">Razem:</th>
+          <th>{{ total }} zł</th>
+          <th></th>
+        </tr>
+        </tfoot>
+      </table>
+
+      <form action="{{ path('cart_clear') }}" method="post" data-turbo="false">
+      <button type="submit" class="btn btn-warning">Wyczyść koszyk</button>
+      </form>
+    {% else %}
+      <p>Koszyk jest pusty.</p>
+    {% endif %}
+
+    <a href="{{ path('catalog_product_index') }}" class="btn btn-primary mt-3">Kontynuuj zakupy</a>
+  {% endblock %}

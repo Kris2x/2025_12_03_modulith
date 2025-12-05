@@ -9,7 +9,15 @@
       <li>Cena: {{ product.price }} PLN</li>
     </ul>
 
-    <p>
+    <form action="{{ path('cart_add', {productId: product.id}) }}" method="post" data-turbo="false">
+    <label for="quantity">Ilość:</label>
+      <input type="number" name="quantity" id="quantity" value="1" min="1" style="width: 60px">
+      <button type="submit" class="btn btn-success">Dodaj do koszyka</button>
+    </form>
+
+    <p class="mt-3">
       <a href="{{ path('catalog_product_index') }}">Powrót do listy produktów</a>
+      |
+      <a href="{{ path('cart_index') }}">Zobacz koszyk</a>
     </p>
   {% endblock %}

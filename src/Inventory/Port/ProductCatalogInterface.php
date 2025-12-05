@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Inventory\Service;
+namespace App\Inventory\Port;
 
 interface ProductCatalogInterface
 {

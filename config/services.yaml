@@ -23,7 +23,7 @@ services:
     # please note that last definitions always *replace* previous ones
 
     App\Inventory\Port\ProductCatalogInterface:
-        alias: App\Catalog\Adapter\CartProductCatalogProvider
+        alias: App\Catalog\Adapter\InventoryProductAdapter
 
     App\Cart\Port\CartProductProviderInterface:
-        alias: App\Catalog\Adapter\CartProductCatalogProvider
+        alias: App\Catalog\Adapter\CartProductAdapter

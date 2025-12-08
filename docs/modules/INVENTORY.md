@@ -123,7 +123,7 @@ interface ProductCatalogInterface
 }
 ```
 
-**Implementacja:** `Catalog\Adapter\CartProductCatalogProvider`
+**Implementacja:** `Catalog\Adapter\InventoryProductAdapter`
 
 **Zastosowanie:**
 - Wyświetlanie nazw produktów w widoku magazynu
@@ -279,7 +279,7 @@ templates/inventory/stock/
                            │ implements
 ┌──────────────────────────│──────────────────────────────────┐
 │                       CATALOG                               │
-│           CartProductCatalogProvider                        │
+│              InventoryProductAdapter                        │
 │                                                             │
 │           ProductCreatedEvent ─────────────────────────────►│
 │           ProductDeletedEvent ─────────────────────────────►│

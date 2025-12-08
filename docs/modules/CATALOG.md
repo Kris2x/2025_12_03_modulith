@@ -9,7 +9,8 @@ Moduł **Catalog** odpowiada za zarządzanie produktami i kategoriami w systemie
 ```
 src/Catalog/
 ├── Adapter/
-│   └── CartProductCatalogProvider.php    # Implementacja portów dla innych modułów
+│   ├── CartProductAdapter.php            # Adapter dla modułu Cart
+│   └── InventoryProductAdapter.php       # Adapter dla modułu Inventory
 ├── Controller/
 │   ├── CategoryController.php            # CRUD kategorii
 │   └── ProductController.php             # CRUD produktów
@@ -149,25 +150,42 @@ readonly class ProductDeletedEvent
 
 ## Adaptery (Porty wyjściowe)
 
-### CartProductCatalogProvider
+Adaptery implementują interfejsy (porty) zdefiniowane przez inne moduły. Każdy adapter ma jedną odpowiedzialność (Interface Segregation Principle).
 
-Adapter implementujący interfejsy wymagane przez inne moduły.
+### CartProductAdapter
 
-**Implementuje:**
-- `Cart\Port\CartProductProviderInterface`
-- `Inventory\Port\ProductCatalogInterface`
+Adapter dla modułu Cart.
+
+**Implementuje:** `Cart\Port\CartProductProviderInterface`
 
 **Metody:**
 
-| Metoda | Interfejs | Opis |
-|--------|-----------|------|
-| `getPrice(int)` | Cart | Pobiera cenę produktu |
-| `productExists(int)` | Cart | Sprawdza czy produkt istnieje |
-| `getProductName(int)` | Cart | Pobiera nazwę pojedynczego produktu |
-| `getProductNames(array)` | Cart, Inventory | Pobiera nazwy wielu produktów (batch) |
+| Metoda | Opis |
+|--------|------|
+| `getPrice(int)` | Pobiera cenę produktu |
+| `productExists(int)` | Sprawdza czy produkt istnieje |
+| `getProductName(int)` | Pobiera nazwę pojedynczego produktu |
+| `getProductNames(array)` | Pobiera nazwy wielu produktów (batch) |
+
+### InventoryProductAdapter
+
+Adapter dla modułu Inventory.
+
+**Implementuje:** `Inventory\Port\ProductCatalogInterface`
+
+**Metody:**
+
+| Metoda | Opis |
+|--------|------|
+| `getProductNames(array)` | Pobiera nazwy wielu produktów (batch) |
 
 **Dlaczego batch?**
 Metoda `getProductNames(array)` wykonuje jedno zapytanie SQL zamiast N zapytań, eliminując problem N+1.
+
+**Dlaczego dwa adaptery?**
+- Rozdzielenie odpowiedzialności (SRP)
+- Zmiany dla Cart nie wpływają na Inventory i odwrotnie
+- Łatwiejsze testowanie jednostkowe
 
 ---
 
@@ -253,10 +271,11 @@ templates/catalog/
 │  │  ProductCreatedEvent    ProductDeletedEvent        │   │
 │  └─────────────────────────────────────────────────────┘   │
 │                                                             │
-│  ┌─────────────────────────────────────────────────────┐   │
-│  │              CartProductCatalogProvider              │   │
-│  │  implements: CartProductProviderInterface            │   │
-│  │              ProductCatalogInterface                 │   │
-│  └─────────────────────────────────────────────────────┘   │
+│  ┌───────────────────────┐  ┌───────────────────────────┐  │
+│  │  CartProductAdapter   │  │  InventoryProductAdapter  │  │
+│  │  implements:          │  │  implements:              │  │
+│  │  CartProductProvider  │  │  ProductCatalogInterface  │  │
+│  │  Interface            │  │                           │  │
+│  └───────────────────────┘  └───────────────────────────┘  │
 └─────────────────────────────────────────────────────────────┘
 ```

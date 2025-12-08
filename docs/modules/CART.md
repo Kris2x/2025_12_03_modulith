@@ -169,7 +169,7 @@ interface CartProductProviderInterface
 }
 ```
 
-**Implementacja:** `Catalog\Adapter\CartProductCatalogProvider`
+**Implementacja:** `Catalog\Adapter\CartProductAdapter`
 
 **Dlaczego interfejs?**
 - **Odwrócenie zależności** - Cart nie zależy od Catalog, tylko od abstrakcji
@@ -298,18 +298,17 @@ templates/cart/
 │  │                      ▼                               │   │
 │  │        CartProductProviderInterface ◄─── PORT        │   │
 │  └─────────────────────────────────────────────────────┘   │
-│                          ▲                                  │
-│                          │ implements                       │
-│  ┌───────────────────────│──────────────────────────────┐   │
+│                                                             │
+│  ┌─────────────────────────────────────────────────────┐   │
 │  │  ProductDeletedSubscriber                             │   │
 │  │  listens: ProductDeletedEvent (from Catalog)          │   │
-│  └───────────────────────────────────────────────────────┘   │
+│  └─────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────┘
                            ▲
                            │ implements
 ┌──────────────────────────│──────────────────────────────────┐
 │                       CATALOG                               │
-│           CartProductCatalogProvider                        │
+│                  CartProductAdapter                         │
 └─────────────────────────────────────────────────────────────┘
 ```
 

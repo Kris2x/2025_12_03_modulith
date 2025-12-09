@@ -19,6 +19,10 @@
     <div class="alert alert-success">{{ flash }}</div>
 {% endfor %}
 
+{% for flash in app.flashes('error') %}
+    <div class="alert alert-danger">{{ flash }}</div>
+{% endfor %}
+
 {% if cart and cart.items|length > 0 %}
     <table class="table">
         <thead>

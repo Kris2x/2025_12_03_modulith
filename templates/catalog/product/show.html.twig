@@ -18,6 +18,10 @@
     <div class="alert alert-success">{{ flash }}</div>
 {% endfor %}
 
+{% for flash in app.flashes('error') %}
+    <div class="alert alert-danger">{{ flash }}</div>
+{% endfor %}
+
 <div class="product-detail">
     <div class="price">{{ product.price }} PLN</div>
 

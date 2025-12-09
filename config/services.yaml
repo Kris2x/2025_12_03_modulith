@@ -27,3 +27,6 @@ services:
 
     App\Cart\Port\CartProductProviderInterface:
         alias: App\Catalog\Adapter\CartProductAdapter
+
+    App\Cart\Port\StockAvailabilityInterface:
+        alias: App\Inventory\Adapter\StockAvailabilityAdapter

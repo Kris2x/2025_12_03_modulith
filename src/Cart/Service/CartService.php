@@ -6,7 +6,9 @@ use App\Cart\Entity\Cart;
 use App\Cart\Entity\CartItem;
 use App\Cart\Repository\CartRepository;
 use App\Cart\Repository\CartItemRepository;
+use App\Cart\Exception\InsufficientStockException;
 use App\Cart\Port\CartProductProviderInterface;
+use App\Cart\Port\StockAvailabilityInterface;
 use Doctrine\ORM\EntityManagerInterface;
 use InvalidArgumentException;
 
@@ -17,7 +19,9 @@ class CartService
     private CartItemRepository $cartItemRepository,
     private EntityManagerInterface $em,
     private CartProductProviderInterface $priceProvider,
+    private StockAvailabilityInterface $stockChecker,
   ) {}
+
 
   public function findCart(string $sessionId): ?Cart
   {
@@ -43,10 +47,19 @@ class CartService
     // Sprawdź czy produkt już jest w koszyku
     foreach ($cart->getItems() as $item) {
       if ($item->getProductId() === $productId) {
-        $item->setQuantity($item->getQuantity() + $quantity);
+        $newQuantity = $item->getQuantity() + $quantity;
+        if (!$this->stockChecker->isAvailable($productId, $newQuantity)) {
+          throw new InsufficientStockException($productId, $newQuantity);
+        }
+        $item->setQuantity($newQuantity);
         $this->em->flush();
         return;
       }
+    }
+
+    // Nowa pozycja - sprawdź dostępność
+    if (!$this->stockChecker->isAvailable($productId, $quantity)) {
+      throw new InsufficientStockException($productId, $quantity);
     }
 
     // Nowa pozycja
@@ -108,6 +121,9 @@ class CartService
         if ($quantity <= 0) {
           $cart->removeItem($item);
         } else {
+          if (!$this->stockChecker->isAvailable($productId, $quantity)) {
+            throw new InsufficientStockException($productId, $quantity);
+          }
           $item->setQuantity($quantity);
         }
         $this->em->flush();

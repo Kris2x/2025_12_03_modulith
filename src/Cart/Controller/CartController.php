@@ -2,6 +2,7 @@
 
 namespace App\Cart\Controller;
 
+use App\Cart\Exception\InsufficientStockException;
 use App\Cart\Service\CartService;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\Request;
@@ -50,11 +51,15 @@ class CartController extends AbstractController
         }
 
         $quantity = (int) $request->request->get('quantity', 1);
-        $this->cartService->addItem($cart, $productId, $quantity);
 
-        $this->addFlash('success', 'Dodano do koszyka');
-
-        return $this->redirectToRoute('cart_index');
+        try {
+            $this->cartService->addItem($cart, $productId, $quantity);
+            $this->addFlash('success', 'Dodano do koszyka');
+            return $this->redirectToRoute('cart_index');
+        } catch (InsufficientStockException $e) {
+            $this->addFlash('error', 'Niewystarczająca ilość produktu na stanie');
+            return $this->redirectToRoute('catalog_product_show', ['id' => $productId]);
+        }
     }
 
     #[Route('/remove/{productId}', name: 'remove', methods: ['POST'])]
@@ -93,8 +98,13 @@ class CartController extends AbstractController
 
         if ($cart) {
             $quantity = (int) $request->request->get('quantity', 1);
-            $this->cartService->updateItemQuantity($cart, $productId, $quantity);
-            $this->addFlash('success', 'Ilość zaktualizowana');
+
+            try {
+                $this->cartService->updateItemQuantity($cart, $productId, $quantity);
+                $this->addFlash('success', 'Ilość zaktualizowana');
+            } catch (InsufficientStockException $e) {
+                $this->addFlash('error', 'Niewystarczająca ilość produktu na stanie');
+            }
         }
 
         return $this->redirectToRoute('cart_index');

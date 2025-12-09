@@ -2,8 +2,8 @@
 
 namespace App\Inventory\EventSubscriber;
 
-use App\Catalog\Event\ProductCreatedEvent;
-use App\Catalog\Event\ProductDeletedEvent;
+use App\Shared\Event\ProductCreatedEvent;
+use App\Shared\Event\ProductDeletedEvent;
 use App\Inventory\Service\StockService;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 

@@ -25,17 +25,39 @@
 <div class="product-detail">
     <div class="price">{{ product.price }} PLN</div>
 
+    <div class="stock-info">
+        {% if stockQuantity > 0 %}
+            <span class="badge badge-success">Na stanie: {{ stockQuantity }} szt.</span>
+            {% if quantityInCart > 0 %}
+                <span class="badge badge-info">W koszyku: {{ quantityInCart }} szt.</span>
+                {% if availableQuantity > 0 %}
+                    <span class="badge badge-warning">Możesz dodać: {{ availableQuantity }} szt.</span>
+                {% else %}
+                    <span class="badge badge-danger">Maksymalna ilość w koszyku</span>
+                {% endif %}
+            {% endif %}
+        {% else %}
+            <span class="badge badge-danger">Brak na stanie</span>
+        {% endif %}
+    </div>
+
     {% if product.description %}
         <div class="description">{{ product.description }}</div>
     {% endif %}
 
     <div class="section">
         <h3 class="section-title">Dodaj do koszyka</h3>
-        <form action="{{ path('cart_add', {productId: product.id}) }}" method="post" data-turbo="false" class="inline-form">
-            <label for="quantity">Ilość:</label>
-            <input type="number" name="quantity" id="quantity" value="1" min="1">
-            <button type="submit" class="btn btn-success">Dodaj do koszyka</button>
-        </form>
+        {% if availableQuantity > 0 %}
+            <form action="{{ path('cart_add', {productId: product.id}) }}" method="post" data-turbo="false" class="inline-form">
+                <label for="quantity">Ilość:</label>
+                <input type="number" name="quantity" id="quantity" value="1" min="1" max="{{ availableQuantity }}">
+                <button type="submit" class="btn btn-success">Dodaj do koszyka</button>
+            </form>
+        {% elseif quantityInCart > 0 %}
+            <p class="text-muted">Masz już maksymalną ilość tego produktu w koszyku</p>
+        {% else %}
+            <p class="text-muted">Produkt chwilowo niedostępny</p>
+        {% endif %}
     </div>
 </div>
 {% endblock %}

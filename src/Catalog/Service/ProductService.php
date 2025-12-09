@@ -5,8 +5,8 @@ namespace App\Catalog\Service;
 use App\Catalog\Entity\Product;
 use App\Catalog\Repository\ProductRepository;
 use Doctrine\ORM\EntityManagerInterface;
-use App\Catalog\Event\ProductCreatedEvent;
-use App\Catalog\Event\ProductDeletedEvent;
+use App\Shared\Event\ProductCreatedEvent;
+use App\Shared\Event\ProductDeletedEvent;
 use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
 
 class ProductService

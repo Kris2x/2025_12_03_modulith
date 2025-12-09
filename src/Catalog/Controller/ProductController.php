@@ -4,6 +4,8 @@ namespace App\Catalog\Controller;
 
 use App\Catalog\Entity\Product;
 use App\Catalog\Form\ProductType;
+use App\Catalog\Port\CartQuantityInterface;
+use App\Catalog\Port\StockInfoInterface;
 use App\Catalog\Service\ProductService;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\Request;
@@ -15,9 +17,9 @@ class ProductController extends AbstractController
 {
   public function __construct(
     private readonly ProductService $productService,
-  )
-  {
-  }
+    private readonly StockInfoInterface $stockInfo,
+    private readonly CartQuantityInterface $cartQuantity,
+  ) {}
 
   #[Route('', name: 'index', methods: ['GET'])]
   public function index(): Response
@@ -51,7 +53,7 @@ class ProductController extends AbstractController
   }
 
   #[Route('/{id}', name: 'show', methods: ['GET'])]
-  public function show(int $id): Response
+  public function show(int $id, Request $request): Response
   {
     $product = $this->productService->getProduct($id);
 
@@ -59,8 +61,17 @@ class ProductController extends AbstractController
       throw $this->createNotFoundException();
     }
 
+    $stockQuantity = $this->stockInfo->getQuantity($id);
+    $cartId = $request->getSession()->get('cart_id', '');
+    $quantityInCart = $this->cartQuantity->getQuantityInCart($cartId, $id);
+    $availableQuantity = max(0, $stockQuantity - $quantityInCart);
+
     return $this->render('catalog/product/show.html.twig', [
       'product' => $product,
+      'stockQuantity' => $stockQuantity,
+      'quantityInCart' => $quantityInCart,
+      'availableQuantity' => $availableQuantity,
+      'isInStock' => $availableQuantity > 0,
     ]);
   }
 

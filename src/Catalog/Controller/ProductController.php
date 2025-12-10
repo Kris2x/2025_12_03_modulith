@@ -7,6 +7,9 @@ use App\Catalog\Form\ProductType;
 use App\Catalog\Port\CartQuantityInterface;
 use App\Catalog\Port\StockInfoInterface;
 use App\Catalog\Service\ProductService;
+use App\Shared\Bus\QueryBusInterface;
+use App\Shared\Query\Cart\GetCartQuantityQuery;
+use App\Shared\Query\Inventory\GetStockQuantityQuery;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -19,6 +22,7 @@ class ProductController extends AbstractController
     private readonly ProductService $productService,
     private readonly StockInfoInterface $stockInfo,
     private readonly CartQuantityInterface $cartQuantity,
+    private readonly QueryBusInterface $queryBus,
   ) {}
 
   #[Route('', name: 'index', methods: ['GET'])]
@@ -113,5 +117,67 @@ class ProductController extends AbstractController
     $this->addFlash('success', 'Produkt usunięty');
 
     return $this->redirectToRoute('catalog_product_index');
+  }
+
+  /**
+   * Demo: Porównanie Port/Adapter vs Query Bus.
+   *
+   * Ta akcja pokazuje dwa sposoby pobierania tych samych danych:
+   * 1. Port/Adapter - interfejsy wstrzykiwane przez DI
+   * 2. Query Bus - query wysyłane przez bus
+   *
+   * Oba podejścia dają identyczne wyniki, ale różnią się strukturą kodu.
+   */
+  #[Route('/{id}/compare-approaches', name: 'compare_approaches', methods: ['GET'])]
+  public function compareApproaches(int $id, Request $request): Response
+  {
+    $product = $this->productService->getProduct($id);
+
+    if (!$product) {
+      throw $this->createNotFoundException();
+    }
+
+    $cartId = $request->getSession()->get('cart_id', '');
+
+    // ============================================
+    // PODEJŚCIE 1: Port/Adapter
+    // ============================================
+    // Zalety:
+    // - Type-safe (IDE wie co zwraca metoda)
+    // - Jasne zależności w konstruktorze
+    // Wady:
+    // - Wymaga: Port + Adapter + alias w services.yaml
+    // - Przy 50 operacjach = 150 plików
+    $stockViaPort = $this->stockInfo->getQuantity($id);
+    $cartQtyViaPort = $this->cartQuantity->getQuantityInCart($cartId, $id);
+
+    // ============================================
+    // PODEJŚCIE 2: Query Bus
+    // ============================================
+    // Zalety:
+    // - Jedna zależność (QueryBus) dla wszystkich operacji
+    // - Query + Handler (bez dodatkowego aliasu)
+    // - Łatwe dodanie middleware (caching, logging)
+    // Wady:
+    // - Brak type-hints dla wyniku (IDE nie wie co zwraca)
+    // - Dodatkowa warstwa abstrakcji
+    $stockViaQueryBus = $this->queryBus->query(
+      new GetStockQuantityQuery(productId: $id)
+    );
+    $cartQtyViaQueryBus = $this->queryBus->query(
+      new GetCartQuantityQuery(sessionId: $cartId, productId: $id)
+    );
+
+    return $this->render('catalog/product/compare_approaches.html.twig', [
+      'product' => $product,
+      'portAdapter' => [
+        'stockQuantity' => $stockViaPort,
+        'cartQuantity' => $cartQtyViaPort,
+      ],
+      'queryBus' => [
+        'stockQuantity' => $stockViaQueryBus,
+        'cartQuantity' => $cartQtyViaQueryBus,
+      ],
+    ]);
   }
 }

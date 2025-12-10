@@ -36,3 +36,7 @@ services:
 
     App\Catalog\Port\CartQuantityInterface:
         alias: App\Cart\Adapter\CartQuantityAdapter
+
+    # Query Bus - alternatywne podejście do komunikacji między modułami
+    App\Shared\Bus\QueryBusInterface:
+        alias: App\Shared\Bus\QueryBus

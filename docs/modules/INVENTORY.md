@@ -8,6 +8,9 @@ Moduł **Inventory** odpowiada za zarządzanie stanami magazynowymi produktów. 
 
 ```
 src/Inventory/
+├── Adapter/
+│   ├── StockAvailabilityAdapter.php      # Adapter dla Cart (sprawdzanie dostępności)
+│   └── StockInfoAdapter.php              # Adapter dla Catalog (stan magazynowy)
 ├── Controller/
 │   └── StockController.php               # Zarządzanie stanami magazynowymi
 ├── Entity/
@@ -18,6 +21,9 @@ src/Inventory/
 │   └── StockItemType.php                 # Formularz edycji stanu
 ├── Port/
 │   └── ProductCatalogInterface.php       # Interfejs do pobierania nazw produktów
+├── QueryHandler/
+│   ├── GetStockQuantityHandler.php       # Handler Query Bus - ilość na stanie
+│   └── CheckStockAvailabilityHandler.php # Handler Query Bus - sprawdzenie dostępności
 ├── Repository/
 │   └── StockItemRepository.php           # Repozytorium stanów
 └── Service/
@@ -228,12 +234,25 @@ Inventory ──[ProductCatalogInterface]──► Catalog
 
 Moduł Inventory używa interfejsu `ProductCatalogInterface` do pobierania nazw produktów w celu wyświetlenia ich w widoku.
 
+### Udostępnia dane (eksportuje)
+
+```
+Cart ────[StockAvailabilityInterface]───► Inventory
+Catalog ─[StockInfoInterface]───────────► Inventory
+```
+
+Moduł Inventory implementuje adaptery dla:
+- **StockAvailabilityAdapter** (dla Cart) - walidacja dostępności przy dodawaniu do koszyka
+- **StockInfoAdapter** (dla Catalog) - wyświetlanie stanu na stronie produktu
+
 ### Reaguje na eventy (nasłuchuje)
 
 ```
-Catalog ──[ProductCreatedEvent]──► Inventory (tworzy StockItem)
-Catalog ──[ProductDeletedEvent]──► Inventory (usuwa StockItem)
+Shared ──[ProductCreatedEvent]──► Inventory (tworzy StockItem)
+Shared ──[ProductDeletedEvent]──► Inventory (usuwa StockItem)
 ```
+
+**Uwaga:** Eventy są teraz w `Shared/Event/` (SharedKernel pattern).
 
 **Automatyzacja:**
 - Tworzenie produktu → automatyczny wpis magazynowy z `quantity=0`
@@ -266,23 +285,33 @@ templates/inventory/stock/
 │  │       │                                              │   │
 │  │       │ uses                                         │   │
 │  │       ▼                                              │   │
-│  │  ProductCatalogInterface ◄─── PORT                   │   │
+│  │  ProductCatalogInterface ◄─── PORT (from Catalog)    │   │
 │  └─────────────────────────────────────────────────────┘   │
 │                                                             │
 │  ┌─────────────────────────────────────────────────────┐   │
 │  │           ProductEventSubscriber                     │   │
 │  │  listens: ProductCreatedEvent (creates StockItem)    │   │
 │  │           ProductDeletedEvent (removes StockItem)    │   │
+│  │  (eventy z Shared/Event/)                            │   │
+│  └─────────────────────────────────────────────────────┘   │
+│                                                             │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │  Adaptery (eksportowane)                              │   │
+│  │  - StockAvailabilityAdapter (for Cart)                │   │
+│  │  - StockInfoAdapter (for Catalog)                     │   │
+│  └─────────────────────────────────────────────────────┘   │
+│                                                             │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │  QueryHandlers (dla Query Bus)                       │   │
+│  │  - GetStockQuantityHandler                           │   │
+│  │  - CheckStockAvailabilityHandler                     │   │
 │  └─────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────┘
                            ▲
-                           │ implements
+                           │ implements ProductCatalogInterface
 ┌──────────────────────────│──────────────────────────────────┐
 │                       CATALOG                               │
 │              InventoryProductAdapter                        │
-│                                                             │
-│           ProductCreatedEvent ─────────────────────────────►│
-│           ProductDeletedEvent ─────────────────────────────►│
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -311,6 +340,105 @@ Zamiast ręcznie tworzyć `StockItem` przy tworzeniu produktu, używamy eventów
 ### 4. Batch loading
 
 `getProductNames(array $productIds)` pobiera nazwy wszystkich produktów jednym zapytaniem SQL, eliminując problem N+1.
+
+---
+
+## Adaptery (Porty wyjściowe)
+
+### StockAvailabilityAdapter
+
+Adapter dla modułu Cart - walidacja dostępności.
+
+**Implementuje:** `Cart\Port\StockAvailabilityInterface`
+
+```php
+namespace App\Inventory\Adapter;
+
+use App\Cart\Port\StockAvailabilityInterface;
+
+class StockAvailabilityAdapter implements StockAvailabilityInterface
+{
+    public function isAvailable(int $productId, int $quantity): bool
+    {
+        return $this->stockService->isAvailable($productId, $quantity);
+    }
+
+    public function getAvailableQuantity(int $productId): int
+    {
+        $stock = $this->stockService->getStockForProduct($productId);
+        return $stock ? $stock->getQuantity() : 0;
+    }
+}
+```
+
+### StockInfoAdapter
+
+Adapter dla modułu Catalog - wyświetlanie stanu magazynowego.
+
+**Implementuje:** `Catalog\Port\StockInfoInterface`
+
+```php
+namespace App\Inventory\Adapter;
+
+use App\Catalog\Port\StockInfoInterface;
+
+class StockInfoAdapter implements StockInfoInterface
+{
+    public function getStockQuantity(int $productId): int
+    {
+        $stock = $this->stockService->getStockForProduct($productId);
+        return $stock ? $stock->getQuantity() : 0;
+    }
+}
+```
+
+---
+
+## Query Bus (alternatywa)
+
+Moduł Inventory udostępnia handlery dla Query Bus:
+
+### GetStockQuantityHandler
+
+```php
+namespace App\Inventory\QueryHandler;
+
+use App\Shared\Query\Inventory\GetStockQuantityQuery;
+
+class GetStockQuantityHandler
+{
+    public function __invoke(GetStockQuantityQuery $query): int
+    {
+        $stock = $this->stockService->getStockForProduct($query->productId);
+        return $stock ? $stock->getQuantity() : 0;
+    }
+}
+```
+
+### CheckStockAvailabilityHandler
+
+```php
+namespace App\Inventory\QueryHandler;
+
+use App\Shared\Query\Inventory\CheckStockAvailabilityQuery;
+
+class CheckStockAvailabilityHandler
+{
+    public function __invoke(CheckStockAvailabilityQuery $query): bool
+    {
+        return $this->stockService->isAvailable($query->productId, $query->quantity);
+    }
+}
+```
+
+**Użycie:**
+```php
+$isAvailable = $this->queryBus->query(
+    new CheckStockAvailabilityQuery($productId, $quantity)
+);
+```
+
+Więcej o Query Bus w [docs/articles/QUERY_BUS_GUIDE.md](../articles/QUERY_BUS_GUIDE.md).
 
 ---
 

@@ -8,6 +8,8 @@ Moduł **Cart** odpowiada za zarządzanie koszykiem zakupowym. Przechowuje produ
 
 ```
 src/Cart/
+├── Adapter/
+│   └── CartQuantityAdapter.php           # Adapter dla Catalog (ilość w koszyku)
 ├── Controller/
 │   └── CartController.php                # Operacje na koszyku
 ├── Entity/
@@ -15,8 +17,13 @@ src/Cart/
 │   └── CartItem.php                      # Pozycja w koszyku
 ├── EventSubscriber/
 │   └── ProductDeletedSubscriber.php      # Reaguje na usunięcie produktu
+├── Exception/
+│   └── InsufficientStockException.php    # Wyjątek braku towaru
 ├── Port/
-│   └── CartProductProviderInterface.php  # Interfejs do pobierania danych produktów
+│   ├── CartProductProviderInterface.php  # Interfejs do pobierania danych produktów
+│   └── StockAvailabilityInterface.php    # Interfejs do sprawdzania dostępności
+├── QueryHandler/
+│   └── GetCartQuantityHandler.php        # Handler dla Query Bus
 ├── Repository/
 │   ├── CartRepository.php                # Repozytorium koszyków
 │   └── CartItemRepository.php            # Repozytorium pozycji koszyka
@@ -95,7 +102,8 @@ Główny serwis do zarządzania koszykiem.
 - `CartRepository` - dostęp do koszyków
 - `CartItemRepository` - dostęp do pozycji
 - `EntityManagerInterface` - operacje na bazie
-- `CartProductProviderInterface` - **port** do pobierania danych produktów
+- `CartProductProviderInterface` - **port** do pobierania danych produktów (Catalog)
+- `StockAvailabilityInterface` - **port** do sprawdzania dostępności (Inventory)
 
 **Metody:**
 
@@ -121,17 +129,31 @@ public function addItem(Cart $cart, int $productId, int $quantity = 1): void
         throw new InvalidArgumentException("Product $productId not found");
     }
 
-    // 2. Sprawdź czy już jest w koszyku
+    // 2. Oblicz całkowitą ilość (istniejąca + nowa)
+    $currentQuantity = 0;
     foreach ($cart->getItems() as $item) {
         if ($item->getProductId() === $productId) {
-            // Zwiększ ilość
-            $item->setQuantity($item->getQuantity() + $quantity);
+            $currentQuantity = $item->getQuantity();
+            break;
+        }
+    }
+    $totalQuantity = $currentQuantity + $quantity;
+
+    // 3. Walidacja dostępności w magazynie
+    if (!$this->stockAvailability->isAvailable($productId, $totalQuantity)) {
+        throw new InsufficientStockException($productId, $totalQuantity);
+    }
+
+    // 4. Sprawdź czy już jest w koszyku
+    foreach ($cart->getItems() as $item) {
+        if ($item->getProductId() === $productId) {
+            $item->setQuantity($totalQuantity);
             $this->em->flush();
             return;
         }
     }
 
-    // 3. Nowa pozycja - zapisz cenę z momentu dodania
+    // 5. Nowa pozycja - zapisz cenę z momentu dodania
     $item = new CartItem();
     $item->setProductId($productId);
     $item->setQuantity($quantity);
@@ -144,7 +166,7 @@ public function addItem(Cart $cart, int $productId, int $quantity = 1): void
 
 ---
 
-## Port (interfejs wejściowy)
+## Porty (interfejsy wejściowe)
 
 ### CartProductProviderInterface
 
@@ -171,10 +193,58 @@ interface CartProductProviderInterface
 
 **Implementacja:** `Catalog\Adapter\CartProductAdapter`
 
-**Dlaczego interfejs?**
-- **Odwrócenie zależności** - Cart nie zależy od Catalog, tylko od abstrakcji
+### StockAvailabilityInterface
+
+Interfejs do sprawdzania dostępności produktów w magazynie.
+
+```php
+namespace App\Cart\Port;
+
+interface StockAvailabilityInterface
+{
+    /**
+     * Sprawdza czy żądana ilość produktu jest dostępna
+     */
+    public function isAvailable(int $productId, int $quantity): bool;
+
+    /**
+     * Zwraca dostępną ilość produktu
+     */
+    public function getAvailableQuantity(int $productId): int;
+}
+```
+
+**Implementacja:** `Inventory\Adapter\StockAvailabilityAdapter`
+
+**Dlaczego osobny port dla dostępności?**
+- **Interface Segregation** - Cart potrzebuje tylko sprawdzenia dostępności, nie pełnego API magazynu
+- **Separacja odpowiedzialności** - dane produktów z Catalog, dostępność z Inventory
 - **Testowalność** - łatwo mockować w testach
-- **Elastyczność** - można podmienić implementację bez zmiany kodu Cart
+
+---
+
+## Adapter (interfejs wyjściowy)
+
+### CartQuantityAdapter
+
+Adapter implementujący port `CartQuantityInterface` z modułu Catalog.
+
+```php
+namespace App\Cart\Adapter;
+
+use App\Catalog\Port\CartQuantityInterface;
+
+class CartQuantityAdapter implements CartQuantityInterface
+{
+    public function getQuantityInCart(int $productId, string $sessionId): int
+    {
+        // Zwraca ilość danego produktu w koszyku użytkownika
+    }
+}
+```
+
+**Dlaczego Cart eksportuje dane?**
+Moduł Catalog wyświetla na stronie produktu ile sztuk użytkownik ma już w koszyku. Cart dostarcza tę informację przez adapter.
 
 ---
 
@@ -254,12 +324,25 @@ public function index(Request $request): Response
 
 ```
 Cart ──[CartProductProviderInterface]──► Catalog
+     ──[StockAvailabilityInterface]───► Inventory
 ```
 
-Moduł Cart używa interfejsu `CartProductProviderInterface` do:
-- Sprawdzenia czy produkt istnieje
-- Pobrania aktualnej ceny przy dodawaniu
-- Pobrania nazw produktów do wyświetlenia
+Moduł Cart używa portów do:
+- **CartProductProviderInterface** (Catalog):
+  - Sprawdzenia czy produkt istnieje
+  - Pobrania aktualnej ceny przy dodawaniu
+  - Pobrania nazw produktów do wyświetlenia
+- **StockAvailabilityInterface** (Inventory):
+  - Walidacji dostępności przed dodaniem do koszyka
+  - Sprawdzenia ile można jeszcze dodać
+
+### Udostępnia dane (eksportuje)
+
+```
+Catalog ──[CartQuantityInterface]──► Cart
+```
+
+Moduł Cart implementuje adapter `CartQuantityAdapter` dla Catalog, umożliwiając wyświetlenie ilości produktu w koszyku na stronie produktu.
 
 ### Reaguje na eventy (nasłuchuje)
 
@@ -297,11 +380,17 @@ templates/cart/
 │  │                      │ uses                          │   │
 │  │                      ▼                               │   │
 │  │        CartProductProviderInterface ◄─── PORT        │   │
+│  │        StockAvailabilityInterface   ◄─── PORT        │   │
 │  └─────────────────────────────────────────────────────┘   │
 │                                                             │
 │  ┌─────────────────────────────────────────────────────┐   │
 │  │  ProductDeletedSubscriber                             │   │
-│  │  listens: ProductDeletedEvent (from Catalog)          │   │
+│  │  listens: ProductDeletedEvent (from Shared)           │   │
+│  └─────────────────────────────────────────────────────┘   │
+│                                                             │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │  CartQuantityAdapter                                   │   │
+│  │  implements: CartQuantityInterface (for Catalog)       │   │
 │  └─────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────┘
                            ▲
@@ -309,6 +398,12 @@ templates/cart/
 ┌──────────────────────────│──────────────────────────────────┐
 │                       CATALOG                               │
 │                  CartProductAdapter                         │
+└─────────────────────────────────────────────────────────────┘
+                           ▲
+                           │ implements
+┌──────────────────────────│──────────────────────────────────┐
+│                      INVENTORY                              │
+│                StockAvailabilityAdapter                     │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -330,3 +425,89 @@ Cena produktu może się zmienić, ale w koszyku zostaje cena z momentu dodania.
 ### 3. Batch loading nazw produktów
 
 Zamiast pobierać nazwę każdego produktu osobno (N+1 problem), `getProductNames()` pobiera wszystkie naraz w jednym zapytaniu SQL.
+
+---
+
+## Obsługa wyjątków
+
+### InsufficientStockException
+
+Dedykowany wyjątek rzucany, gdy użytkownik próbuje dodać do koszyka więcej produktów niż jest dostępnych.
+
+```php
+namespace App\Cart\Exception;
+
+class InsufficientStockException extends \RuntimeException
+{
+    public function __construct(
+        public readonly int $productId,
+        public readonly int $requestedQuantity,
+        public readonly int $availableQuantity = 0,
+    ) {
+        parent::__construct(sprintf(
+            'Insufficient stock for product %d. Requested: %d, Available: %d',
+            $productId,
+            $requestedQuantity,
+            $availableQuantity
+        ));
+    }
+}
+```
+
+**Obsługa w kontrolerze:**
+
+```php
+public function add(Request $request, int $productId): Response
+{
+    try {
+        $this->cartService->addItem($cart, $productId, $quantity);
+        $this->addFlash('success', 'Produkt dodany do koszyka');
+    } catch (InsufficientStockException $e) {
+        $this->addFlash('error', sprintf(
+            'Niewystarczająca ilość produktu na stanie. Dostępne: %d',
+            $e->availableQuantity
+        ));
+        return $this->redirectToRoute('catalog_product_show', ['id' => $productId]);
+    }
+
+    return $this->redirectToRoute('cart_index');
+}
+```
+
+**Dlaczego dedykowany wyjątek?**
+- Umożliwia precyzyjną obsługę błędu w kontrolerze
+- Zawiera kontekst (productId, ilości) do wyświetlenia użytkownikowi
+- Oddziela logikę biznesową od prezentacji błędu
+
+---
+
+## Query Bus (alternatywa)
+
+Moduł Cart udostępnia również handler dla Query Bus:
+
+### GetCartQuantityHandler
+
+```php
+namespace App\Cart\QueryHandler;
+
+use App\Shared\Query\Cart\GetCartQuantityQuery;
+
+class GetCartQuantityHandler
+{
+    public function __invoke(GetCartQuantityQuery $query): int
+    {
+        // Zwraca ilość produktu w koszyku użytkownika
+        return $this->cartItemRepository->getQuantityForProduct(
+            $query->productId,
+            $query->sessionId
+        );
+    }
+}
+```
+
+**Użycie:**
+```php
+$quantity = $this->queryBus->query(new GetCartQuantityQuery($productId, $sessionId));
+```
+
+Więcej o Query Bus w [docs/articles/QUERY_BUS_GUIDE.md](../articles/QUERY_BUS_GUIDE.md).

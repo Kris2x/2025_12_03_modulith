@@ -13,16 +13,19 @@ src/Catalog/
 │   └── InventoryProductAdapter.php       # Adapter dla modułu Inventory
 ├── Controller/
 │   ├── CategoryController.php            # CRUD kategorii
-│   └── ProductController.php             # CRUD produktów
+│   └── ProductController.php             # CRUD produktów + demo Query Bus
 ├── Entity/
 │   ├── Category.php                      # Encja kategorii
 │   └── Product.php                       # Encja produktu
-├── Event/
-│   ├── ProductCreatedEvent.php           # Event tworzenia produktu
-│   └── ProductDeletedEvent.php           # Event usunięcia produktu
 ├── Form/
 │   ├── CategoryType.php                  # Formularz kategorii
 │   └── ProductType.php                   # Formularz produktu
+├── Port/
+│   ├── StockInfoInterface.php            # Port do pobierania stanu magazynowego
+│   └── CartQuantityInterface.php         # Port do pobierania ilości w koszyku
+├── QueryHandler/
+│   ├── GetProductNamesHandler.php        # Handler Query Bus - nazwy produktów
+│   └── GetProductPriceHandler.php        # Handler Query Bus - cena produktu
 ├── Repository/
 │   ├── CategoryRepository.php            # Repozytorium kategorii
 │   └── ProductRepository.php             # Repozytorium produktów
@@ -30,6 +33,8 @@ src/Catalog/
     ├── CategoryService.php               # Logika biznesowa kategorii
     └── ProductService.php                # Logika biznesowa produktów
 ```
+
+**Uwaga:** Eventy `ProductCreatedEvent` i `ProductDeletedEvent` zostały przeniesione do `Shared/Event/` (SharedKernel pattern).
 
 ---
 
@@ -112,11 +117,14 @@ Serwis do zarządzania kategoriami.
 
 ## Eventy (zdarzenia domenowe)
 
+**Lokalizacja:** `src/Shared/Event/` (SharedKernel pattern)
+
 ### ProductCreatedEvent
 
 Emitowany po utworzeniu nowego produktu.
 
 ```php
+// src/Shared/Event/ProductCreatedEvent.php
 readonly class ProductCreatedEvent
 {
     public function __construct(
@@ -134,6 +142,7 @@ readonly class ProductCreatedEvent
 Emitowany po usunięciu produktu.
 
 ```php
+// src/Shared/Event/ProductDeletedEvent.php
 readonly class ProductDeletedEvent
 {
     public function __construct(
@@ -145,6 +154,11 @@ readonly class ProductDeletedEvent
 **Subskrybenci:**
 - `Inventory\ProductEventSubscriber` - usuwa `StockItem`
 - `Cart\ProductDeletedSubscriber` - usuwa pozycje koszyka z tym produktem
+
+**Dlaczego eventy w Shared?**
+- Uniknięcie cyklicznych zależności między modułami
+- Każdy moduł importuje eventy z Shared, nie z innych modułów biznesowych
+- Zmiana sygnatury eventu w jednym miejscu
 
 ---
 
@@ -189,6 +203,70 @@ Metoda `getProductNames(array)` wykonuje jedno zapytanie SQL zamiast N zapytań,
 
 ---
 
+## Porty (interfejsy wejściowe)
+
+Porty definiują co moduł Catalog potrzebuje od innych modułów do wyświetlenia strony produktu.
+
+### StockInfoInterface
+
+Port do pobierania informacji o stanie magazynowym.
+
+```php
+namespace App\Catalog\Port;
+
+interface StockInfoInterface
+{
+    /**
+     * Zwraca ilość produktu na stanie magazynowym
+     */
+    public function getStockQuantity(int $productId): int;
+}
+```
+
+**Implementacja:** `Inventory\Adapter\StockInfoAdapter`
+
+### CartQuantityInterface
+
+Port do pobierania ilości produktu w koszyku użytkownika.
+
+```php
+namespace App\Catalog\Port;
+
+interface CartQuantityInterface
+{
+    /**
+     * Zwraca ilość produktu w koszyku dla danej sesji
+     */
+    public function getQuantityInCart(int $productId, string $sessionId): int;
+}
+```
+
+**Implementacja:** `Cart\Adapter\CartQuantityAdapter`
+
+**Zastosowanie na stronie produktu:**
+
+```php
+// ProductController::show()
+$stockQuantity = $this->stockInfo->getStockQuantity($product->getId());
+$cartQuantity = $this->cartQuantity->getQuantityInCart($product->getId(), $sessionId);
+$availableQuantity = max(0, $stockQuantity - $cartQuantity);
+
+return $this->render('catalog/product/show.html.twig', [
+    'product' => $product,
+    'stockQuantity' => $stockQuantity,
+    'cartQuantity' => $cartQuantity,
+    'availableQuantity' => $availableQuantity,
+]);
+```
+
+**Widok produktu wyświetla:**
+- Stan magazynowy (np. "Na stanie: 10 szt.")
+- Ilość w koszyku (np. "W koszyku: 2 szt.")
+- Dostępna ilość do dodania (np. "Możesz dodać: 8 szt.")
+- Formularz blokowany gdy `availableQuantity = 0`
+
+---
+
 ## Kontrolery i routing
 
 ### ProductController
@@ -221,11 +299,22 @@ Metoda `getProductNames(array)` wykonuje jedno zapytanie SQL zamiast N zapytań,
 ### Jako dostawca danych (eksportuje)
 
 ```
-Catalog ──[CartProductCatalogProvider]──► Cart
-                                        ► Inventory
+Catalog ──[CartProductAdapter]──────► Cart
+        ──[InventoryProductAdapter]─► Inventory
 ```
 
 Moduł Catalog **nie zna** swoich konsumentów. Implementuje interfejsy zdefiniowane przez inne moduły.
+
+### Pobiera dane z (konsumuje)
+
+```
+Catalog ──[StockInfoInterface]────► Inventory
+        ──[CartQuantityInterface]─► Cart
+```
+
+Moduł Catalog pobiera dane do wyświetlenia na stronie produktu:
+- Stan magazynowy z Inventory
+- Ilość w koszyku z Cart
 
 ### Przez eventy (publikuje)
 
@@ -262,20 +351,79 @@ templates/catalog/
 │                         CATALOG                             │
 │  ┌─────────────────────────────────────────────────────┐   │
 │  │  Controller ──► Service ──► Repository ──► Entity   │   │
-│  │                    │                                │   │
-│  │                    ▼                                │   │
-│  │            EventDispatcher                          │   │
-│  │                    │                                │   │
-│  │        ┌───────────┴───────────┐                   │   │
-│  │        ▼                       ▼                   │   │
-│  │  ProductCreatedEvent    ProductDeletedEvent        │   │
+│  │       │            │                                │   │
+│  │       │ uses       ▼                                │   │
+│  │       │     EventDispatcher                         │   │
+│  │       ▼            │                                │   │
+│  │  StockInfoInterface◄──── PORT (from Inventory)      │   │
+│  │  CartQuantityInterface◄─ PORT (from Cart)           │   │
 │  └─────────────────────────────────────────────────────┘   │
 │                                                             │
 │  ┌───────────────────────┐  ┌───────────────────────────┐  │
 │  │  CartProductAdapter   │  │  InventoryProductAdapter  │  │
 │  │  implements:          │  │  implements:              │  │
 │  │  CartProductProvider  │  │  ProductCatalogInterface  │  │
-│  │  Interface            │  │                           │  │
+│  │  Interface (for Cart) │  │  (for Inventory)          │  │
 │  └───────────────────────┘  └───────────────────────────┘  │
+│                                                             │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │  QueryHandlers (dla Query Bus)                       │   │
+│  │  - GetProductNamesHandler                            │   │
+│  │  - GetProductPriceHandler                            │   │
+│  └─────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────┘
+                           ▲
+                           │ implements ports
+┌──────────────────────────│──────────────────────────────────┐
+│                      INVENTORY                              │
+│                   StockInfoAdapter                          │
+└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│                        CART                                 │
+│                  CartQuantityAdapter                        │
 └─────────────────────────────────────────────────────────────┘
 ```
+
+---
+
+## Query Bus (alternatywa)
+
+Moduł Catalog udostępnia handlery dla Query Bus:
+
+### GetProductNamesHandler
+
+```php
+namespace App\Catalog\QueryHandler;
+
+use App\Shared\Query\Catalog\GetProductNamesQuery;
+
+class GetProductNamesHandler
+{
+    public function __invoke(GetProductNamesQuery $query): array
+    {
+        return $this->productRepository->getProductNames($query->productIds);
+    }
+}
+```
+
+### GetProductPriceHandler
+
+```php
+namespace App\Catalog\QueryHandler;
+
+use App\Shared\Query\Catalog\GetProductPriceQuery;
+
+class GetProductPriceHandler
+{
+    public function __invoke(GetProductPriceQuery $query): ?string
+    {
+        $product = $this->productRepository->find($query->productId);
+        return $product?->getPrice();
+    }
+}
+```
+
+**Demo porównawcze:**
+Akcja `ProductController::compareApproaches()` prezentuje różnicę między Port/Adapter a Query Bus na żywo.
+
+Więcej o Query Bus w [docs/articles/QUERY_BUS_GUIDE.md](../articles/QUERY_BUS_GUIDE.md).

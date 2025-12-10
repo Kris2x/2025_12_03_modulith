@@ -15,8 +15,9 @@ src/Inventory/
 │   └── StockController.php               # Zarządzanie stanami magazynowymi
 ├── Entity/
 │   └── StockItem.php                     # Encja stanu magazynowego
-├── EventSubscriber/
-│   └── ProductEventSubscriber.php        # Reaguje na eventy produktów
+├── EventHandler/                         # Handlery eventów (Symfony Messenger)
+│   ├── ProductCreatedHandler.php         # Reaguje na ProductCreatedEvent
+│   └── ProductDeletedHandler.php         # Reaguje na ProductDeletedEvent
 ├── Form/
 │   └── StockItemType.php                 # Formularz edycji stanu
 ├── Port/
@@ -137,30 +138,46 @@ interface ProductCatalogInterface
 
 ---
 
-## Event Subscribers
+## Event Handlers
 
-### ProductEventSubscriber
+Handlery eventów są zaimplementowane jako Symfony Messenger handlers, co pozwala na:
+- Unifikację z Query Bus (ten sam mechanizm)
+- Łatwe przejście na async (zmiana w `messenger.yaml`)
+- Przygotowanie pod Outbox Pattern
 
-Reaguje na eventy z modułu Catalog dotyczące produktów.
+### ProductCreatedHandler
+
+Reaguje na utworzenie produktu w module Catalog.
 
 ```php
-class ProductEventSubscriber implements EventSubscriberInterface
+#[AsMessageHandler(bus: 'event.bus')]
+final class ProductCreatedHandler
 {
-    public static function getSubscribedEvents(): array
-    {
-        return [
-            ProductCreatedEvent::class => 'onProductCreated',
-            ProductDeletedEvent::class => 'onProductDeleted',
-        ];
-    }
+    public function __construct(
+        private StockService $stockService,
+    ) {}
 
-    public function onProductCreated(ProductCreatedEvent $event): void
+    public function __invoke(ProductCreatedEvent $event): void
     {
         // Automatycznie tworzy StockItem z quantity=0 dla nowego produktu
         $this->stockService->createStockItem($event->productId);
     }
+}
+```
 
-    public function onProductDeleted(ProductDeletedEvent $event): void
+### ProductDeletedHandler
+
+Reaguje na usunięcie produktu w module Catalog.
+
+```php
+#[AsMessageHandler(bus: 'event.bus')]
+final class ProductDeletedHandler
+{
+    public function __construct(
+        private StockService $stockService,
+    ) {}
+
+    public function __invoke(ProductDeletedEvent $event): void
     {
         // Usuwa StockItem gdy produkt jest usuwany
         $this->stockService->removeByProductId($event->productId);

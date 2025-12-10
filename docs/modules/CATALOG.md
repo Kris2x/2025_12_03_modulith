@@ -86,7 +86,7 @@ Główny serwis do zarządzania produktami.
 **Zależności:**
 - `EntityManagerInterface` - operacje na bazie
 - `ProductRepository` - dostęp do produktów
-- `EventDispatcherInterface` - emitowanie eventów
+- `EventBusInterface` - emitowanie eventów (Symfony Messenger)
 
 **Metody:**
 

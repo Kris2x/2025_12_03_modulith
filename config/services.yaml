@@ -37,6 +37,22 @@ services:
     App\Catalog\Port\CartQuantityInterface:
         alias: App\Cart\Adapter\CartQuantityAdapter
 
-    # Query Bus - alternatywne podejście do komunikacji między modułami
+    # ==========================================================================
+    # Bus Configuration - zunifikowana komunikacja między modułami
+    # ==========================================================================
+
+    # Query Bus - pobieranie danych z innych modułów (sync, zwraca wartość)
     App\Shared\Bus\QueryBusInterface:
         alias: App\Shared\Bus\QueryBus
+
+    App\Shared\Bus\QueryBus:
+        arguments:
+            $messageBus: '@query.bus'
+
+    # Event Bus - powiadamianie o zmianach (sync/async, fire & forget)
+    App\Shared\Bus\EventBusInterface:
+        alias: App\Shared\Bus\EventBus
+
+    App\Shared\Bus\EventBus:
+        arguments:
+            $eventBus: '@event.bus'

@@ -1,0 +1,217 @@
+# Diagram zależności modułów
+
+## Przepływ danych między modułami (z Query Bus i Event Bus)
+
+```mermaid
+flowchart TB
+    subgraph SHARED["🔗 SHARED"]
+        direction LR
+        subgraph S_BUS["Bus"]
+            QBI["QueryBusInterface"]
+            EBI["EventBusInterface"]
+        end
+        subgraph S_EVENT["Event"]
+            PCE["ProductCreatedEvent"]
+            PDE["ProductDeletedEvent"]
+        end
+        subgraph S_QUERY["Query"]
+            SQ["Catalog/ Inventory/ Cart/"]
+        end
+    end
+
+    subgraph CATALOG["📦 CATALOG"]
+        direction TB
+        C_ENT["<b>Entity</b><br>Product<br>Category"]
+        C_SVC["<b>Service</b><br>ProductService<br>CategoryService"]
+
+        subgraph C_PORTS["Ports (definiuje interfejsy)"]
+            C_P1["StockInfoInterface"]
+            C_P2["CartQuantityInterface"]
+        end
+
+        subgraph C_ADAPTERS["Adapters (implementuje cudze)"]
+            C_A1["InventoryProductAdapter"]
+            C_A2["CartProductAdapter"]
+        end
+
+        subgraph C_QH["QueryHandler"]
+            C_QH1["GetProductPriceHandler"]
+            C_QH2["GetProductNamesHandler"]
+        end
+    end
+
+    subgraph INVENTORY["📦 INVENTORY"]
+        direction TB
+        I_ENT["<b>Entity</b><br>StockItem"]
+        I_SVC["<b>Service</b><br>StockService"]
+
+        subgraph I_PORTS["Ports (definiuje interfejsy)"]
+            I_P1["ProductCatalogInterface"]
+        end
+
+        subgraph I_ADAPTERS["Adapters (implementuje cudze)"]
+            I_A1["StockAvailabilityAdapter"]
+            I_A2["StockInfoAdapter"]
+        end
+
+        subgraph I_EH["EventHandler"]
+            I_EH1["ProductCreatedHandler"]
+            I_EH2["ProductDeletedHandler"]
+        end
+
+        subgraph I_QH["QueryHandler"]
+            I_QH1["GetStockQuantityHandler"]
+            I_QH2["CheckStockAvailabilityHandler"]
+        end
+    end
+
+    subgraph CART["📦 CART"]
+        direction TB
+        CR_ENT["<b>Entity</b><br>Cart<br>CartItem"]
+        CR_SVC["<b>Service</b><br>CartService"]
+
+        subgraph CR_PORTS["Ports (definiuje interfejsy)"]
+            CR_P1["CartProductProviderInterface"]
+            CR_P2["StockAvailabilityInterface"]
+        end
+
+        subgraph CR_ADAPTERS["Adapters (implementuje cudze)"]
+            CR_A1["CartQuantityAdapter"]
+        end
+
+        subgraph CR_EH["EventHandler"]
+            CR_EH1["ProductDeletedHandler"]
+        end
+
+        subgraph CR_QH["QueryHandler"]
+            CR_QH1["GetCartQuantityHandler"]
+        end
+    end
+
+    %% Event flow - publikacja przez Event Bus
+    C_SVC -->|"eventBus.dispatch"| EBI
+    EBI --> PCE
+    EBI --> PDE
+
+    %% Event flow - handlery
+    PCE -->|"#[AsMessageHandler]"| I_EH1
+    PDE -->|"#[AsMessageHandler]"| I_EH2
+    PDE -->|"#[AsMessageHandler]"| CR_EH1
+
+    %% Port/Adapter: Catalog definiuje, inni implementują
+    I_A2 -.->|"implements"| C_P1
+    CR_A1 -.->|"implements"| C_P2
+
+    %% Port/Adapter: Inventory definiuje, Catalog implementuje
+    C_A1 -.->|"implements"| I_P1
+
+    %% Port/Adapter: Cart definiuje, inni implementują
+    C_A2 -.->|"implements"| CR_P1
+    I_A1 -.->|"implements"| CR_P2
+```
+
+## Uproszczony widok zależności
+
+```mermaid
+flowchart LR
+    SHARED["🔗 SHARED<br><i>Bus/ Event/ Query/</i>"]
+
+    CATALOG["📦 CATALOG<br><i>Produkty</i>"]
+    INVENTORY["📦 INVENTORY<br><i>Stany magazynowe</i>"]
+    CART["📦 CART<br><i>Koszyk</i>"]
+
+    %% Wszystkie importują z Shared
+    SHARED --> CATALOG
+    SHARED --> INVENTORY
+    SHARED --> CART
+
+    %% Port/Adapter connections
+    INVENTORY -->|"StockInfoAdapter<br>implements StockInfoInterface"| CATALOG
+    CART -->|"CartQuantityAdapter<br>implements CartQuantityInterface"| CATALOG
+
+    CATALOG -->|"InventoryProductAdapter<br>implements ProductCatalogInterface"| INVENTORY
+
+    CATALOG -->|"CartProductAdapter<br>implements CartProductProviderInterface"| CART
+    INVENTORY -->|"StockAvailabilityAdapter<br>implements StockAvailabilityInterface"| CART
+```
+
+## Macierz zależności Port/Adapter
+
+| Moduł definiuje Port | Moduł implementuje Adapter | Interfejs |
+|---------------------|---------------------------|-----------|
+| **Catalog** | Inventory | `StockInfoInterface` |
+| **Catalog** | Cart | `CartQuantityInterface` |
+| **Inventory** | Catalog | `ProductCatalogInterface` |
+| **Cart** | Catalog | `CartProductProviderInterface` |
+| **Cart** | Inventory | `StockAvailabilityInterface` |
+
+## Przepływ eventów (Symfony Messenger)
+
+```mermaid
+sequenceDiagram
+    participant C as Catalog<br>ProductService
+    participant EB as Event Bus<br>(event.bus)
+    participant I as Inventory<br>EventHandler/
+    participant CR as Cart<br>EventHandler/
+
+    Note over C,CR: Tworzenie produktu
+    C->>EB: eventBus->dispatch(ProductCreatedEvent)
+    EB->>I: ProductCreatedHandler->__invoke()
+    I->>I: stockService->createStockItem()
+
+    Note over C,CR: Usuwanie produktu
+    C->>EB: eventBus->dispatch(ProductDeletedEvent)
+    EB->>I: ProductDeletedHandler->__invoke()
+    I->>I: stockService->removeByProductId()
+    EB->>CR: ProductDeletedHandler->__invoke()
+    CR->>CR: cartService->removeItemsByProductId()
+```
+
+## Przepływ Query Bus
+
+```mermaid
+sequenceDiagram
+    participant C as Catalog<br>Controller
+    participant QB as Query Bus<br>(query.bus)
+    participant I as Inventory<br>QueryHandler/
+    participant CR as Cart<br>QueryHandler/
+
+    Note over C,CR: Pobieranie stanu magazynowego
+    C->>QB: queryBus->query(GetStockQuantityQuery)
+    QB->>I: GetStockQuantityHandler->__invoke()
+    I-->>QB: int (quantity)
+    QB-->>C: int (quantity)
+
+    Note over C,CR: Pobieranie ilości w koszyku
+    C->>QB: queryBus->query(GetCartQuantityQuery)
+    QB->>CR: GetCartQuantityHandler->__invoke()
+    CR-->>QB: int (quantity)
+    QB-->>C: int (quantity)
+```
+
+## Konfiguracja Messenger
+
+```yaml
+# config/packages/messenger.yaml
+framework:
+    messenger:
+        buses:
+            messenger.bus.default: ~
+            query.bus:
+                middleware:
+                    - validation
+            event.bus:
+                default_middleware:
+                    enabled: true
+                    allow_no_handlers: true
+```
+
+## Legenda
+
+| Symbol | Znaczenie |
+|--------|-----------|
+| `-->` solid | Publikacja eventu, wywołanie query lub użycie |
+| `-.->` dashed | Implementacja interfejsu (Port/Adapter) |
+| 📦 | Moduł biznesowy |
+| 🔗 | Moduł współdzielony |
+| `#[AsMessageHandler]` | Atrybut Symfony Messenger do rejestracji handlera |

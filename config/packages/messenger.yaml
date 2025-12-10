@@ -15,15 +15,31 @@ framework:
             failed: 'doctrine://default?queue_name=failed'
             # sync: 'sync://'
 
+        # Default bus dla ogólnych wiadomości
         default_bus: messenger.bus.default
 
         buses:
+            # Domyślny bus
             messenger.bus.default: []
 
+            # Query Bus - synchroniczny, zwraca wartość
+            # Używany do pobierania danych z innych modułów
+            query.bus:
+                middleware:
+                    - validation
+
+            # Event Bus - domyślnie synchroniczny, może być async
+            # Używany do powiadamiania innych modułów o zmianach
+            event.bus:
+                default_middleware:
+                    enabled: true
+                    allow_no_handlers: true  # Event może nie mieć subskrybentów
+
         routing:
+            # Symfony built-in async messages
             Symfony\Component\Mailer\Messenger\SendEmailMessage: async
             Symfony\Component\Notifier\Message\ChatMessage: async
             Symfony\Component\Notifier\Message\SmsMessage: async
 
-            # Route your messages to the transports
-            # 'App\Message\YourMessage': async
+            # Events - na razie sync, łatwo zmienić na async:
+            # 'App\Shared\Event\*': async

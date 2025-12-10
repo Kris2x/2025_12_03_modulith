@@ -544,7 +544,9 @@ Query Bus to wzorzec, w którym zamiast bezpośrednio wywoływać metody innych 
 └─────────────────────┘              └─────────────────────┘
 ```
 
-### Implementacja
+### Implementacja (aktualna w projekcie)
+
+W tym projekcie Query Bus i Event Bus są zunifikowane na Symfony Messenger.
 
 #### Krok 1: Definiujemy Query w Shared
 
@@ -610,9 +612,9 @@ final readonly class CheckStockAvailabilityQuery
 
 ```php
 <?php
-// src/Inventory/Query/GetStockQuantityHandler.php
+// src/Inventory/QueryHandler/GetStockQuantityHandler.php
 
-namespace App\Inventory\Query;
+namespace App\Inventory\QueryHandler;
 
 use App\Shared\Query\Inventory\GetStockQuantityQuery;
 use App\Inventory\Service\StockService;
@@ -622,9 +624,9 @@ use Symfony\Component\Messenger\Attribute\AsMessageHandler;
  * Handler dla GetStockQuantityQuery.
  *
  * Handlery są automatycznie rejestrowane przez Symfony Messenger
- * dzięki atrybutowi AsMessageHandler.
+ * dzięki atrybutowi AsMessageHandler z bus: 'query.bus'.
  */
-#[AsMessageHandler]
+#[AsMessageHandler(bus: 'query.bus')]
 final class GetStockQuantityHandler
 {
     public function __construct(
@@ -641,15 +643,15 @@ final class GetStockQuantityHandler
 
 ```php
 <?php
-// src/Inventory/Query/CheckStockAvailabilityHandler.php
+// src/Inventory/QueryHandler/CheckStockAvailabilityHandler.php
 
-namespace App\Inventory\Query;
+namespace App\Inventory\QueryHandler;
 
 use App\Shared\Query\Inventory\CheckStockAvailabilityQuery;
 use App\Inventory\Service\StockService;
 use Symfony\Component\Messenger\Attribute\AsMessageHandler;
 
-#[AsMessageHandler]
+#[AsMessageHandler(bus: 'query.bus')]
 final class CheckStockAvailabilityHandler
 {
     public function __construct(
@@ -673,18 +675,30 @@ final class CheckStockAvailabilityHandler
 
 framework:
     messenger:
-        # Query bus - synchroniczny
         buses:
+            messenger.bus.default: ~
             query.bus:
                 middleware:
                     - validation
-
-        routing:
-            # Nie routujemy query do transportu - są synchroniczne
-            'App\Shared\Query\*': sync
+            event.bus:
+                default_middleware:
+                    enabled: true
+                    allow_no_handlers: true  # Event może nie mieć handlerów
 ```
 
-#### Krok 4: Tworzymy wrapper dla Query Bus
+#### Krok 4: Tworzymy wrapper dla Query Bus i Event Bus
+
+```php
+<?php
+// src/Shared/Bus/QueryBusInterface.php
+
+namespace App\Shared\Bus;
+
+interface QueryBusInterface
+{
+    public function query(object $query): mixed;
+}
+```
 
 ```php
 <?php
@@ -695,25 +709,15 @@ namespace App\Shared\Bus;
 use Symfony\Component\Messenger\MessageBusInterface;
 use Symfony\Component\Messenger\Stamp\HandledStamp;
 
-/**
- * Wrapper dla Symfony Messenger zapewniający type-safe query handling.
- */
-final class QueryBus
+final class QueryBus implements QueryBusInterface
 {
     public function __construct(
-        private MessageBusInterface $queryBus,
+        private MessageBusInterface $messageBus,
     ) {}
 
-    /**
-     * Wysyła query i zwraca wynik.
-     *
-     * @template T
-     * @param object $query
-     * @return T
-     */
     public function query(object $query): mixed
     {
-        $envelope = $this->queryBus->dispatch($query);
+        $envelope = $this->messageBus->dispatch($query);
 
         /** @var HandledStamp|null $handled */
         $handled = $envelope->last(HandledStamp::class);
@@ -729,7 +733,40 @@ final class QueryBus
 }
 ```
 
-#### Krok 5: Używamy Query Bus w innych modułach
+```php
+<?php
+// src/Shared/Bus/EventBusInterface.php
+
+namespace App\Shared\Bus;
+
+interface EventBusInterface
+{
+    public function dispatch(object $event): void;
+}
+```
+
+```php
+<?php
+// src/Shared/Bus/EventBus.php
+
+namespace App\Shared\Bus;
+
+use Symfony\Component\Messenger\MessageBusInterface;
+
+final class EventBus implements EventBusInterface
+{
+    public function __construct(
+        private MessageBusInterface $eventBus,
+    ) {}
+
+    public function dispatch(object $event): void
+    {
+        $this->eventBus->dispatch($event);
+    }
+}
+```
+
+#### Krok 5: Używamy Query Bus i Event Bus w innych modułach
 
 ```php
 <?php
@@ -737,7 +774,7 @@ final class QueryBus
 
 namespace App\Cart\Service;
 
-use App\Shared\Bus\QueryBus;
+use App\Shared\Bus\QueryBusInterface;
 use App\Shared\Query\Inventory\CheckStockAvailabilityQuery;
 use App\Shared\Query\Catalog\GetProductPriceQuery;
 
@@ -745,7 +782,7 @@ class CartService
 {
     public function __construct(
         private CartRepository $cartRepository,
-        private QueryBus $queryBus,  // Jeden bus dla wszystkich query
+        private QueryBusInterface $queryBus,  // Jeden bus dla wszystkich query
     ) {}
 
     public function addItem(Cart $cart, int $productId, int $quantity): void
@@ -1296,14 +1333,14 @@ namespace App\Catalog\Service;
 
 use App\Shared\Event\ProductCreatedEvent;
 use App\Shared\Event\ProductPriceChangedEvent;
-use Symfony\Component\EventDispatcher\EventDispatcherInterface;
+use App\Shared\Bus\EventBusInterface;
 
 class ProductService
 {
     public function __construct(
         private ProductRepository $productRepository,
         private EntityManagerInterface $em,
-        private EventDispatcherInterface $dispatcher,
+        private EventBusInterface $eventBus,
     ) {}
 
     public function createProduct(string $name, string $price, ?string $description): Product
@@ -1316,8 +1353,8 @@ class ProductService
         $this->em->persist($product);
         $this->em->flush();
 
-        // Publikujemy event z pełnymi danymi
-        $this->dispatcher->dispatch(new ProductCreatedEvent(
+        // Publikujemy event z pełnymi danymi przez Event Bus
+        $this->eventBus->dispatch(new ProductCreatedEvent(
             productId: $product->getId(),
             name: $product->getName(),
             price: $product->getPrice(),
@@ -1336,7 +1373,7 @@ class ProductService
         $product->setPrice($newPrice);
         $this->em->flush();
 
-        $this->dispatcher->dispatch(new ProductPriceChangedEvent(
+        $this->eventBus->dispatch(new ProductPriceChangedEvent(
             productId: $productId,
             oldPrice: $oldPrice,
             newPrice: $newPrice,
@@ -1346,7 +1383,61 @@ class ProductService
 }
 ```
 
-#### Krok 3: Moduły budują projekcje z eventów
+#### Krok 3: Moduły obsługują eventy przez MessageHandler
+
+W tym projekcie używamy Symfony Messenger z `#[AsMessageHandler(bus: 'event.bus')]`:
+
+```php
+<?php
+// src/Inventory/EventHandler/ProductCreatedHandler.php
+
+namespace App\Inventory\EventHandler;
+
+use App\Shared\Event\ProductCreatedEvent;
+use App\Inventory\Service\StockService;
+use Symfony\Component\Messenger\Attribute\AsMessageHandler;
+
+#[AsMessageHandler(bus: 'event.bus')]
+final class ProductCreatedHandler
+{
+    public function __construct(
+        private StockService $stockService,
+    ) {}
+
+    public function __invoke(ProductCreatedEvent $event): void
+    {
+        $this->stockService->createStockItem($event->productId);
+    }
+}
+```
+
+```php
+<?php
+// src/Cart/EventHandler/ProductDeletedHandler.php
+
+namespace App\Cart\EventHandler;
+
+use App\Shared\Event\ProductDeletedEvent;
+use App\Cart\Service\CartService;
+use Symfony\Component\Messenger\Attribute\AsMessageHandler;
+
+#[AsMessageHandler(bus: 'event.bus')]
+final class ProductDeletedHandler
+{
+    public function __construct(
+        private CartService $cartService,
+    ) {}
+
+    public function __invoke(ProductDeletedEvent $event): void
+    {
+        $this->cartService->removeItemsByProductId($event->productId);
+    }
+}
+```
+
+#### Krok 4: (Opcjonalnie) Moduły budują projekcje z eventów
+
+Dla bardziej zaawansowanych scenariuszy można budować lokalne read modele:
 
 ```php
 <?php
@@ -1779,27 +1870,43 @@ src/
         └── CartFacade.php
 ```
 
-#### Query Bus
+#### Query Bus + Event Bus (aktualny stan projektu)
 ```
 src/
 ├── Shared/
 │   ├── Bus/
-│   │   └── QueryBus.php
+│   │   ├── QueryBusInterface.php
+│   │   ├── QueryBus.php
+│   │   ├── EventBusInterface.php
+│   │   └── EventBus.php
+│   ├── Event/
+│   │   ├── ProductCreatedEvent.php
+│   │   └── ProductDeletedEvent.php
 │   └── Query/
 │       ├── Catalog/
-│       │   ├── GetProductQuery.php
+│       │   ├── GetProductNamesQuery.php
 │       │   └── GetProductPriceQuery.php
-│       └── Inventory/
-│           ├── GetStockQuantityQuery.php
-│           └── CheckAvailabilityQuery.php
+│       ├── Inventory/
+│       │   ├── GetStockQuantityQuery.php
+│       │   └── CheckStockAvailabilityQuery.php
+│       └── Cart/
+│           └── GetCartQuantityQuery.php
 ├── Catalog/
-│   └── Query/
-│       ├── GetProductHandler.php
+│   └── QueryHandler/
+│       ├── GetProductNamesHandler.php
 │       └── GetProductPriceHandler.php
-└── Inventory/
-    └── Query/
-        ├── GetStockQuantityHandler.php
-        └── CheckAvailabilityHandler.php
+├── Inventory/
+│   ├── QueryHandler/
+│   │   ├── GetStockQuantityHandler.php
+│   │   └── CheckStockAvailabilityHandler.php
+│   └── EventHandler/
+│       ├── ProductCreatedHandler.php
+│       └── ProductDeletedHandler.php
+└── Cart/
+    ├── QueryHandler/
+    │   └── GetCartQuantityHandler.php
+    └── EventHandler/
+        └── ProductDeletedHandler.php
 ```
 
 #### Shared DTOs
@@ -1825,29 +1932,31 @@ src/
         └── StockDtoFactory.php
 ```
 
-#### Event Sourcing
+#### Event Sourcing (z EventHandler zamiast EventSubscriber)
 ```
 src/
 ├── Shared/
+│   ├── Bus/
+│   │   ├── EventBusInterface.php
+│   │   └── EventBus.php
 │   └── Event/
 │       ├── ProductCreatedEvent.php
 │       ├── ProductPriceChangedEvent.php
 │       ├── StockReplenishedEvent.php
 │       └── ProductAddedToCartEvent.php
 ├── Catalog/
-│   └── EventSubscriber/
-│       └── (brak - nie słucha innych modułów)
+│   └── (publikuje eventy, nie słucha innych)
 ├── Inventory/
 │   ├── Projection/
 │   │   └── ProductCatalogProjection.php
-│   └── EventSubscriber/
+│   └── EventHandler/
 │       └── ProductCatalogProjector.php
 └── Cart/
     ├── Entity/
     │   └── ProductCatalogView.php
     ├── Projection/
     │   └── ProductCatalogProjection.php
-    └── EventSubscriber/
+    └── EventHandler/
         ├── ProductCatalogProjector.php
         └── StockProjector.php
 ```

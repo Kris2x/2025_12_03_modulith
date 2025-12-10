@@ -22,7 +22,7 @@ Projekt edukacyjny demonstrujący architekturę **modularnego monolitu** w Symfo
 |-------|-------------------|-------------------|--------------|
 | Deployment | Jeden artefakt | Jeden artefakt | Wiele artefaktów |
 | Granice modułów | Brak/rozmyte | Jasne, egzekwowane | Jasne (sieć) |
-| Komunikacja | Bezpośrednie wywołania | Interfejsy/Eventy | HTTP/Message Queue |
+| Komunikacja | Bezpośrednie wywołania | Bus/Interfejsy/Eventy | HTTP/Message Queue |
 | Baza danych | Jedna, współdzielona | Jedna, ale tabele per moduł | Osobne per serwis |
 | Złożoność operacyjna | Niska | Niska | Wysoka |
 | Skalowalność | Ograniczona | Ograniczona | Wysoka |
@@ -41,32 +41,52 @@ Projekt edukacyjny demonstrujący architekturę **modularnego monolitu** w Symfo
 ```
 src/
 ├── Catalog/                    # Moduł katalogu produktów
-│   ├── Adapter/                # Implementacje interfejsów (porty wyjściowe)
+│   ├── Adapter/                # Implementacje interfejsów dla innych modułów
 │   ├── Controller/             # Warstwa prezentacji
 │   ├── Entity/                 # Encje Doctrine (model domeny)
-│   ├── Event/                  # Eventy domenowe
 │   ├── Form/                   # Formularze Symfony
+│   ├── Port/                   # Interfejsy definiujące potrzeby modułu
+│   ├── QueryHandler/           # Handlery Query Bus
 │   ├── Repository/             # Dostęp do danych
 │   └── Service/                # Logika biznesowa
 │
 ├── Inventory/                  # Moduł magazynu
+│   ├── Adapter/                # Implementacje interfejsów dla innych modułów
 │   ├── Controller/
 │   ├── Entity/
-│   ├── EventSubscriber/        # Nasłuchiwacze eventów z innych modułów
-│   ├── Port/                   # Interfejsy (porty wejściowe)
+│   ├── EventHandler/           # Handlery eventów (Symfony Messenger)
+│   ├── Port/                   # Interfejsy definiujące potrzeby modułu
+│   ├── QueryHandler/           # Handlery Query Bus
 │   ├── Repository/
 │   └── Service/
 │
 ├── Cart/                       # Moduł koszyka
+│   ├── Adapter/                # Implementacje interfejsów dla innych modułów
 │   ├── Controller/
 │   ├── Entity/
+│   ├── EventHandler/           # Handlery eventów (Symfony Messenger)
+│   ├── Exception/              # Wyjątki domenowe
 │   ├── Port/                   # Interfejsy definiujące potrzeby modułu
+│   ├── QueryHandler/           # Handlery Query Bus
 │   ├── Repository/
 │   └── Service/
 │
 ├── Order/                      # Moduł zamówień (do implementacji)
+├── Customer/                   # Moduł klientów (do implementacji)
 │
-└── Customer/                   # Moduł klientów (do implementacji)
+└── Shared/                     # Komponenty współdzielone (SharedKernel)
+    ├── Bus/                    # Query Bus i Event Bus
+    │   ├── QueryBusInterface.php
+    │   ├── QueryBus.php
+    │   ├── EventBusInterface.php
+    │   └── EventBus.php
+    ├── Event/                  # Eventy domenowe
+    │   ├── ProductCreatedEvent.php
+    │   └── ProductDeletedEvent.php
+    └── Query/                  # Definicje Query per moduł
+        ├── Catalog/
+        ├── Inventory/
+        └── Cart/
 ```
 
 ### Dlaczego taka struktura?
@@ -77,6 +97,8 @@ Każdy moduł jest **samodzielną jednostką** z własnymi:
 - Serwisami (logika biznesowa)
 - Kontrolerami (API/widoki)
 - Portami/Adapterami (komunikacja z innymi modułami)
+- QueryHandlerami (obsługa zapytań z Query Bus)
+- EventHandlerami (reakcja na eventy)
 
 ---
 
@@ -95,10 +117,10 @@ Każdy moduł jest **samodzielną jednostką** z własnymi:
 - `Category` - kategoria produktów
 
 **Kluczowe elementy:**
-- `ProductService` - logika CRUD dla produktów
+- `ProductService` - logika CRUD dla produktów, emituje eventy przez `EventBusInterface`
 - `CategoryService` - logika CRUD dla kategorii
-- `ProductCreatedEvent` / `ProductDeletedEvent` - eventy domenowe
-- `CartProductCatalogProvider` - adapter implementujący interfejsy dla innych modułów
+- `GetProductPriceHandler`, `GetProductNamesHandler` - handlery Query Bus
+- Adaptery: `InventoryProductAdapter`, `CartProductAdapter`
 
 **Tabele:** `catalog_product`, `catalog_category`
 
@@ -115,8 +137,9 @@ Każdy moduł jest **samodzielną jednostką** z własnymi:
 
 **Kluczowe elementy:**
 - `StockService` - logika zarządzania stanami
-- `ProductEventSubscriber` - reaguje na `ProductCreatedEvent` i `ProductDeletedEvent`
-- `ProductCatalogInterface` - port definiujący co Inventory potrzebuje od Catalog
+- `ProductCreatedHandler`, `ProductDeletedHandler` - handlery eventów (Messenger)
+- `GetStockQuantityHandler`, `CheckStockAvailabilityHandler` - handlery Query Bus
+- Adaptery: `StockAvailabilityAdapter`, `StockInfoAdapter`
 
 **Ważne:** `StockItem.productId` to **int**, NIE relacja Doctrine! Moduły nie mają relacji bazodanowych między sobą.
 
@@ -136,8 +159,9 @@ Każdy moduł jest **samodzielną jednostką** z własnymi:
 
 **Kluczowe elementy:**
 - `CartService` - logika koszyka (add, remove, clear, update)
-- `CartProductProviderInterface` - port definiujący co Cart potrzebuje od Catalog
-- `ProductDeletedSubscriber` - reaguje na usunięcie produktu
+- `ProductDeletedHandler` - handler eventu usunięcia produktu (Messenger)
+- `GetCartQuantityHandler` - handler Query Bus
+- `CartQuantityAdapter` - adapter dla Catalog
 
 **Ważne:** `CartItem.priceAtAdd` przechowuje cenę z momentu dodania - cena może się zmienić, ale w koszyku zostaje stara.
 
@@ -147,32 +171,110 @@ Każdy moduł jest **samodzielną jednostką** z własnymi:
 
 ## Wzorce architektoniczne
 
-### 1. Ports & Adapters (Hexagonal Architecture)
+### 1. Query Bus i Event Bus (Symfony Messenger)
+
+Projekt używa **Symfony Messenger** jako zunifikowanego mechanizmu komunikacji:
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                         INVENTORY                            │
-│  ┌─────────────────────────────────────────────────────┐    │
-│  │                    CORE (Service)                    │    │
-│  │                                                      │    │
-│  │   StockService                                       │    │
-│  │      │                                               │    │
-│  │      │ potrzebuje danych o produktach                │    │
-│  │      ▼                                               │    │
-│  │   ProductCatalogInterface  ◄─── PORT (interfejs)     │    │
-│  │                                                      │    │
-│  └──────────────────────────────────────────────────────┘    │
-│                            ▲                                 │
-└────────────────────────────│─────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                    SYMFONY MESSENGER                            │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  ┌─────────────┐        ┌─────────────┐                        │
+│  │  query.bus  │        │  event.bus  │                        │
+│  │  (sync)     │        │ (sync/async)│                        │
+│  ├─────────────┤        ├─────────────┤                        │
+│  │ Pobieranie  │        │ Powiadamianie│                       │
+│  │ danych      │        │ o zmianach   │                       │
+│  └─────────────┘        └─────────────┘                        │
+│                                                                 │
+│  #[AsMessageHandler]    #[AsMessageHandler(bus: 'event.bus')]  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Query Bus** - pobieranie danych między modułami:
+```php
+// Definicja Query (Shared)
+readonly class GetStockQuantityQuery
+{
+    public function __construct(public int $productId) {}
+}
+
+// Handler (Inventory)
+#[AsMessageHandler(bus: 'query.bus')]
+final class GetStockQuantityHandler
+{
+    public function __invoke(GetStockQuantityQuery $query): int
+    {
+        return $this->repository->getQuantity($query->productId);
+    }
+}
+
+// Użycie (Catalog)
+$stock = $this->queryBus->query(new GetStockQuantityQuery($productId));
+```
+
+**Event Bus** - powiadamianie o zmianach:
+```php
+// Definicja Event (Shared)
+readonly class ProductCreatedEvent
+{
+    public function __construct(
+        public int $productId,
+        public string $productName,
+    ) {}
+}
+
+// Publikacja (Catalog)
+$this->eventBus->dispatch(new ProductCreatedEvent($id, $name));
+
+// Handler (Inventory)
+#[AsMessageHandler(bus: 'event.bus')]
+final class ProductCreatedHandler
+{
+    public function __invoke(ProductCreatedEvent $event): void
+    {
+        $this->stockService->createStockItem($event->productId);
+    }
+}
+```
+
+**Dlaczego Messenger?**
+- Jeden mechanizm dla Query i Event
+- Łatwe przejście na async (zmiana w `messenger.yaml`)
+- Wbudowane middleware (validation, logging)
+- Przygotowanie pod Outbox Pattern
+
+---
+
+### 2. Ports & Adapters (Hexagonal Architecture)
+
+Alternatywa dla Query Bus z pełnym type-safety:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         INVENTORY                               │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │                    CORE (Service)                        │   │
+│  │                                                          │   │
+│  │   StockService                                           │   │
+│  │      │                                                   │   │
+│  │      │ potrzebuje danych o produktach                    │   │
+│  │      ▼                                                   │   │
+│  │   ProductCatalogInterface  ◄─── PORT (interfejs)         │   │
+│  │                                                          │   │
+│  └──────────────────────────────────────────────────────────┘   │
+│                            ▲                                    │
+└────────────────────────────│────────────────────────────────────┘
                              │
                              │ implementuje
                              │
-┌────────────────────────────│─────────────────────────────────┐
-│                         CATALOG                              │
-│                            │                                 │
-│   CartProductCatalogProvider ◄─── ADAPTER (implementacja)    │
-│                                                              │
-└──────────────────────────────────────────────────────────────┘
+┌────────────────────────────│────────────────────────────────────┐
+│                         CATALOG                                 │
+│                            │                                    │
+│   InventoryProductAdapter ◄─── ADAPTER (implementacja)          │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 **Port (interfejs)** - definiuje CO moduł potrzebuje:
@@ -186,8 +288,8 @@ interface ProductCatalogInterface
 
 **Adapter (implementacja)** - dostarcza JAK to zrealizować:
 ```php
-// src/Catalog/Adapter/CartProductCatalogProvider.php
-class CartProductCatalogProvider implements ProductCatalogInterface
+// src/Catalog/Adapter/InventoryProductAdapter.php
+class InventoryProductAdapter implements ProductCatalogInterface
 {
     public function getProductNames(array $productIds): array
     {
@@ -196,106 +298,37 @@ class CartProductCatalogProvider implements ProductCatalogInterface
 }
 ```
 
-**Dlaczego tak?**
-- **Odwrócenie zależności** (Dependency Inversion) - Inventory nie zależy od Catalog, tylko od abstrakcji
-- **Testowalność** - łatwo mockować interfejs w testach
-- **Elastyczność** - można podmienić implementację bez zmiany kodu modułu
-
 ---
 
-### 2. Event-Driven Architecture
+### 3. SharedKernel Pattern
+
+Eventy i Query są współdzielone przez wszystkie moduły:
 
 ```
-┌──────────────┐    ProductCreatedEvent    ┌──────────────┐
-│   CATALOG    │ ─────────────────────────▶│  INVENTORY   │
-│              │                           │              │
-│ ProductService                           │ Subscriber   │
-│   │                                      │   │          │
-│   ├─ save()                              │   └─ create  │
-│   └─ dispatch(event)                     │      StockItem
-└──────────────┘                           └──────────────┘
+src/Shared/
+├── Bus/                    # Infrastruktura
+│   ├── QueryBusInterface.php
+│   ├── QueryBus.php
+│   ├── EventBusInterface.php
+│   └── EventBus.php
+├── Event/                  # Kontrakty eventów
+│   ├── ProductCreatedEvent.php
+│   └── ProductDeletedEvent.php
+└── Query/                  # Kontrakty query
+    ├── Catalog/
+    │   ├── GetProductPriceQuery.php
+    │   └── GetProductNamesQuery.php
+    ├── Inventory/
+    │   ├── GetStockQuantityQuery.php
+    │   └── CheckStockAvailabilityQuery.php
+    └── Cart/
+        └── GetCartQuantityQuery.php
 ```
 
-**Event (zdarzenie)**:
-```php
-// src/Catalog/Event/ProductCreatedEvent.php
-class ProductCreatedEvent
-{
-    public function __construct(
-        public readonly int $productId,
-        public readonly string $productName,
-    ) {}
-}
-```
-
-**Emitowanie eventu**:
-```php
-// src/Catalog/Service/ProductService.php
-$this->dispatcher->dispatch(new ProductCreatedEvent(
-    $product->getId(),
-    $product->getName()
-));
-```
-
-**Nasłuchiwanie eventu**:
-```php
-// src/Inventory/EventSubscriber/ProductCreatedSubscriber.php
-class ProductCreatedSubscriber implements EventSubscriberInterface
-{
-    public static function getSubscribedEvents(): array
-    {
-        return [ProductCreatedEvent::class => 'onProductCreated'];
-    }
-
-    public function onProductCreated(ProductCreatedEvent $event): void
-    {
-        $this->stockService->createStockItem($event->productId);
-    }
-}
-```
-
-**Dlaczego eventy?**
-- **Luźne powiązanie** - Catalog nie wie kto nasłuchuje
-- **Rozszerzalność** - łatwo dodać kolejnych subskrybentów
-- **Asynchroniczność** - można przenieść na kolejkę (Symfony Messenger)
-
----
-
-### 3. Interface Segregation Principle (ISP)
-
-Każdy moduł definiuje **własny interfejs** z metodami których potrzebuje:
-
-```php
-// Inventory potrzebuje tylko nazw produktów
-interface ProductCatalogInterface
-{
-    public function getProductNames(array $productIds): array;
-}
-
-// Cart potrzebuje cen i sprawdzenia istnienia
-interface CartProductProviderInterface
-{
-    public function getPrice(int $productId): string;
-    public function productExists(int $productId): bool;
-    public function getProductName(int $productId): string;
-    public function getProductNames(array $productIds): array;
-}
-```
-
-**Jeden adapter implementuje oba**:
-```php
-class CartProductCatalogProvider implements
-    ProductCatalogInterface,
-    CartProductProviderInterface
-{
-    // implementacje wszystkich metod
-}
-```
-
-**Dlaczego osobne interfejsy?**
-- Moduł zależy tylko od tego co potrzebuje
-- Zmiany w jednym interfejsie nie wpływają na inne moduły
-- Łatwiejsze testowanie (mniejsze mocki)
+**Dlaczego SharedKernel?**
+- Moduły nie importują się nawzajem
+- Wszystkie zależą tylko od Shared
+- Łatwe zarządzanie kontraktami
 
 ---
 
@@ -305,36 +338,35 @@ class CartProductCatalogProvider implements
 
 | Wzorzec | Kiedy używać | Przykład |
 |---------|--------------|----------|
-| **Przez interfejs** | Potrzebujesz danych synchronicznie | Cart → ProductCatalogInterface → Catalog |
-| **Przez event** | Powiadomienie o zmianie | Catalog → ProductCreatedEvent → Inventory |
+| **Query Bus** | Potrzebujesz danych synchronicznie | `GetStockQuantityQuery` → Inventory |
+| **Event Bus** | Powiadomienie o zmianie (fire & forget) | `ProductCreatedEvent` → Inventory, Cart |
+| **Port/Adapter** | Type-safety krytyczne | `CartProductProviderInterface` |
 | **Przez ID** | Referencja do encji innego modułu | CartItem.productId (int) |
 
-### Diagram zależności
+### Diagram przepływu
 
 ```
                     ┌─────────────┐
-                    │   CATALOG   │
+                    │   SHARED    │
                     │  ─────────  │
-                    │  Product    │
-                    │  Category   │
+                    │  Event/     │
+                    │  Query/     │
+                    │  Bus/       │
                     └──────┬──────┘
                            │
            ┌───────────────┼───────────────┐
            │               │               │
-           ▼ event         ▼ interface     ▼ interface
+           ▼               ▼               ▼
     ┌──────────────┐ ┌──────────────┐ ┌──────────────┐
-    │  INVENTORY   │ │    CART      │ │    ORDER     │
+    │   CATALOG    │ │  INVENTORY   │ │    CART      │
     │  ──────────  │ │  ──────────  │ │  ──────────  │
-    │  StockItem   │ │  Cart        │ │  Order       │
-    │  (productId) │ │  CartItem    │ │  OrderItem   │
-    └──────────────┘ │  (productId) │ │  (productId) │
-                     └──────────────┘ │  (customerId)│
-                                      └──────┬───────┘
-                                             │
-                                             ▼ ID ref
-                                      ┌──────────────┐
-                                      │   CUSTOMER   │
-                                      └──────────────┘
+    │  Product     │ │  StockItem   │ │  Cart        │
+    │  Category    │ │  (productId) │ │  CartItem    │
+    │              │ │              │ │  (productId) │
+    │  EventBus ───┼─┼──► Handlers  │ │              │
+    │  QueryHandlers◄┼──── QueryBus │ │  Handlers ◄──┤
+    │              │ │              │ │  QueryHandlers│
+    └──────────────┘ └──────────────┘ └──────────────┘
 ```
 
 ---
@@ -343,8 +375,11 @@ class CartProductCatalogProvider implements
 
 ### DOZWOLONE
 
+- Import **eventów** z `Shared/Event/`
+- Import **query** z `Shared/Query/`
+- Użycie `QueryBusInterface` dla cross-module queries
+- Użycie `EventBusInterface` dla publikacji eventów
 - Import **interfejsów (portów)** z innych modułów
-- Import **eventów** z innych modułów
 - Przechowywanie **ID** encji z innego modułu (jako int)
 - Implementacja interfejsów innych modułów w adapterach
 
@@ -355,8 +390,9 @@ class CartProductCatalogProvider implements
 - Tworzenie **relacji Doctrine** między encjami różnych modułów
 - Współdzielenie tabel w bazie danych
 - Cykliczne zależności między modułami
+- Bezpośrednie wywołanie serwisu z innego modułu
 
-### Przykład - Źले vs DOBRZE
+### Przykład - ZŁE vs DOBRE
 
 ```php
 // ŹLE - bezpośrednia zależność od encji
@@ -387,14 +423,20 @@ class CartService
     ) {}
 }
 
-// DOBRZE - przez interfejs
-use App\Cart\Port\CartProductProviderInterface;
+// DOBRZE - przez Query Bus
+use App\Shared\Bus\QueryBusInterface;
+use App\Shared\Query\Catalog\GetProductPriceQuery;
 
 class CartService
 {
     public function __construct(
-        private CartProductProviderInterface $productProvider  // OK
+        private QueryBusInterface $queryBus
     ) {}
+
+    public function getPrice(int $productId): string
+    {
+        return $this->queryBus->query(new GetProductPriceQuery($productId));
+    }
 }
 ```
 
@@ -437,16 +479,39 @@ php -S localhost:8000 -t public
 - Magazyn: http://localhost:8000/inventory/stock
 - pgAdmin: http://localhost:5050 (admin@admin.com / admin)
 
+### Debugowanie
+
+```bash
+# Podgląd zarejestrowanych busów i handlerów
+php bin/console debug:messenger
+
+# Lista wszystkich route'ów
+php bin/console debug:router
+
+# Wyczyszczenie cache
+php bin/console cache:clear
+```
+
 ---
 
 ## Następne kroki
 
 1. **Order** - moduł zamówień (checkout, historia)
 2. **Customer** - moduł klientów (rejestracja, logowanie)
-3. **Testy** - unit testy dla serwisów, integration testy dla modułów
-4. **Async events** - Symfony Messenger dla eventów
+3. **Outbox Pattern** - niezawodne eventy (transakcyjność)
+4. **Async events** - Symfony Messenger z transportem async
+5. **Testy** - unit testy dla serwisów, integration testy dla modułów
 
 ---
+
+## Dokumentacja
+
+- [docs/PLAN_MODULARNY_MONOLIT.md](docs/PLAN_MODULARNY_MONOLIT.md) - Plan i postępy
+- [docs/CHANGELOG.md](docs/CHANGELOG.md) - Historia zmian architektonicznych
+- [docs/modules/](docs/modules/) - Dokumentacja modułów
+- [docs/articles/QUERY_BUS_GUIDE.md](docs/articles/QUERY_BUS_GUIDE.md) - Poradnik Query/Event Bus
+- [docs/articles/INTER_MODULE_COMMUNICATION_IN_DDD.md](docs/articles/INTER_MODULE_COMMUNICATION_IN_DDD.md) - Komunikacja w DDD
+- [FUTURE_IMPROVEMENTS.md](FUTURE_IMPROVEMENTS.md) - Planowane ulepszenia
 
 ## Materiały
 

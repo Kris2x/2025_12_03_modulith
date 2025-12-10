@@ -1,5 +1,7 @@
 # Query Bus - Poradnik użycia
 
+> **Zobacz też:** [Event Bus](#event-bus) - zunifikowany mechanizm do publikowania eventów domenowych.
+
 ## Czym jest Query Bus?
 
 Query Bus to wzorzec architektoniczny umożliwiający odpytywanie o dane między modułami bez bezpośrednich zależności. Jest alternatywą dla wzorca Port/Adapter.
@@ -452,3 +454,90 @@ Widok pokazuje:
 - Kod dla obu podejść
 - Wyniki (powinny być identyczne)
 - Porównanie zalet i wad
+
+---
+
+## Event Bus
+
+Event Bus jest zunifikowany z Query Bus - oba używają Symfony Messenger. To pozwala na:
+- Spójne API (`#[AsMessageHandler]`)
+- Łatwe przejście na async
+- Wspólne middleware
+
+### EventBusInterface
+
+```php
+// src/Shared/Bus/EventBusInterface.php
+namespace App\Shared\Bus;
+
+interface EventBusInterface
+{
+    /**
+     * Publikuje event do wszystkich zainteresowanych subskrybentów.
+     */
+    public function dispatch(object $event): void;
+}
+```
+
+### Użycie
+
+```php
+// Publisher (Catalog)
+class ProductService
+{
+    public function __construct(
+        private EventBusInterface $eventBus,
+    ) {}
+
+    public function createProduct(Product $product): void
+    {
+        $this->em->persist($product);
+        $this->em->flush();
+
+        $this->eventBus->dispatch(new ProductCreatedEvent(
+            $product->getId(),
+            $product->getName(),
+        ));
+    }
+}
+
+// Subscriber (Inventory)
+#[AsMessageHandler(bus: 'event.bus')]
+final class ProductCreatedHandler
+{
+    public function __invoke(ProductCreatedEvent $event): void
+    {
+        $this->stockService->createStockItem($event->productId);
+    }
+}
+```
+
+### Konfiguracja Messenger
+
+```yaml
+# config/packages/messenger.yaml
+framework:
+    messenger:
+        buses:
+            query.bus:
+                middleware:
+                    - validation
+            event.bus:
+                default_middleware:
+                    enabled: true
+                    allow_no_handlers: true  # Event może nie mieć subskrybentów
+
+        # Łatwe przejście na async:
+        # routing:
+        #     'App\Shared\Event\*': async
+```
+
+### Query vs Event
+
+| Aspekt | Query Bus | Event Bus |
+|--------|-----------|-----------|
+| Cel | Pobierz dane | Powiadom o zmianie |
+| Zwraca | Wartość | Nic (void) |
+| Handlerów | Dokładnie 1 | 0 lub więcej |
+| Timing | Sync | Sync lub async |
+| Przykład | `GetStockQuantityQuery` | `ProductCreatedEvent` |

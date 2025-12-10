@@ -528,17 +528,18 @@ class OrderService
 }
 ```
 
-**Krok 3: Subskrybenci (w różnych modułach)**
+**Krok 3: Handlery eventów (w różnych modułach)**
 
 ```php
-// src/Inventory/EventSubscriber/OrderPlacedSubscriber.php
+// src/Inventory/EventHandler/OrderPlacedHandler.php
 
-namespace App\Inventory\EventSubscriber;
+namespace App\Inventory\EventHandler;
 
 use App\Shared\Event\OrderPlacedEvent;
+use Symfony\Component\Messenger\Attribute\AsMessageHandler;
 
-#[AsMessageHandler]
-class OrderPlacedSubscriber
+#[AsMessageHandler(bus: 'event.bus')]
+final class OrderPlacedHandler
 {
     public function __invoke(OrderPlacedEvent $event): void
     {
@@ -553,14 +554,15 @@ class OrderPlacedSubscriber
 ```
 
 ```php
-// src/Email/EventSubscriber/OrderPlacedSubscriber.php
+// src/Email/EventHandler/OrderPlacedHandler.php
 
-namespace App\Email\EventSubscriber;
+namespace App\Email\EventHandler;
 
 use App\Shared\Event\OrderPlacedEvent;
+use Symfony\Component\Messenger\Attribute\AsMessageHandler;
 
-#[AsMessageHandler]
-class OrderPlacedSubscriber
+#[AsMessageHandler(bus: 'event.bus')]
+final class OrderPlacedHandler
 {
     public function __invoke(OrderPlacedEvent $event): void
     {
@@ -825,12 +827,13 @@ class ProcessOutboxCommand extends Command
 
 ### Inbox Pattern (bonus)
 
-Co jeśli subskrybent otrzyma ten sam event dwa razy? (np. retry po timeout)
+Co jeśli handler otrzyma ten sam event dwa razy? (np. retry po timeout)
 
 ```php
-// src/Inventory/EventSubscriber/OrderPlacedSubscriber.php
+// src/Inventory/EventHandler/OrderPlacedHandler.php
 
-class OrderPlacedSubscriber
+#[AsMessageHandler(bus: 'event.bus')]
+final class OrderPlacedHandler
 {
     public function __invoke(OrderPlacedEvent $event): void
     {

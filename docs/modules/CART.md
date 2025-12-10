@@ -15,8 +15,8 @@ src/Cart/
 ├── Entity/
 │   ├── Cart.php                          # Encja koszyka
 │   └── CartItem.php                      # Pozycja w koszyku
-├── EventSubscriber/
-│   └── ProductDeletedSubscriber.php      # Reaguje na usunięcie produktu
+├── EventHandler/                         # Handlery eventów (Symfony Messenger)
+│   └── ProductDeletedHandler.php         # Reaguje na usunięcie produktu
 ├── Exception/
 │   └── InsufficientStockException.php    # Wyjątek braku towaru
 ├── Port/
@@ -248,23 +248,23 @@ Moduł Catalog wyświetla na stronie produktu ile sztuk użytkownik ma już w ko
 
 ---
 
-## Event Subscribers
+## Event Handlers
 
-### ProductDeletedSubscriber
+Handlery eventów są zaimplementowane jako Symfony Messenger handlers (zunifikowane z Query Bus).
+
+### ProductDeletedHandler
 
 Reaguje na usunięcie produktu z modułu Catalog.
 
 ```php
-class ProductDeletedSubscriber implements EventSubscriberInterface
+#[AsMessageHandler(bus: 'event.bus')]
+final class ProductDeletedHandler
 {
-    public static function getSubscribedEvents(): array
-    {
-        return [
-            ProductDeletedEvent::class => 'onProductDeleted',
-        ];
-    }
+    public function __construct(
+        private CartService $cartService,
+    ) {}
 
-    public function onProductDeleted(ProductDeletedEvent $event): void
+    public function __invoke(ProductDeletedEvent $event): void
     {
         // Usuń wszystkie pozycje koszyka z tym produktem
         $this->cartService->removeItemsByProductId($event->productId);
@@ -273,7 +273,7 @@ class ProductDeletedSubscriber implements EventSubscriberInterface
 ```
 
 **Dlaczego?**
-Bez tego subscriber'a, po usunięciu produktu w koszykach zostałyby "osierocone" pozycje wyświetlające "Nieznany produkt".
+Bez tego handlera, po usunięciu produktu w koszykach zostałyby "osierocone" pozycje wyświetlające "Nieznany produkt".
 
 ---
 

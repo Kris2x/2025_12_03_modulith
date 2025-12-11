@@ -22,21 +22,6 @@ services:
     # add more service definitions when explicit configuration is needed
     # please note that last definitions always *replace* previous ones
 
-    App\Inventory\Port\ProductCatalogInterface:
-        alias: App\Catalog\Adapter\InventoryProductAdapter
-
-    App\Cart\Port\CartProductProviderInterface:
-        alias: App\Catalog\Adapter\CartProductAdapter
-
-    App\Cart\Port\StockAvailabilityInterface:
-        alias: App\Inventory\Adapter\StockAvailabilityAdapter
-
-    App\Catalog\Port\StockInfoInterface:
-        alias: App\Inventory\Adapter\StockInfoAdapter
-
-    App\Catalog\Port\CartQuantityInterface:
-        alias: App\Cart\Adapter\CartQuantityAdapter
-
     # ==========================================================================
     # Bus Configuration - zunifikowana komunikacja między modułami
     # ==========================================================================

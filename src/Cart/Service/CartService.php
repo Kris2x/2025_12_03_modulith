@@ -7,8 +7,11 @@ use App\Cart\Entity\CartItem;
 use App\Cart\Repository\CartRepository;
 use App\Cart\Repository\CartItemRepository;
 use App\Cart\Exception\InsufficientStockException;
-use App\Cart\Port\CartProductProviderInterface;
-use App\Cart\Port\StockAvailabilityInterface;
+use App\Shared\Bus\QueryBusInterface;
+use App\Shared\Query\Catalog\ProductExistsQuery;
+use App\Shared\Query\Catalog\GetProductPriceQuery;
+use App\Shared\Query\Catalog\GetProductNamesQuery;
+use App\Shared\Query\Inventory\CheckStockAvailabilityQuery;
 use Doctrine\ORM\EntityManagerInterface;
 use InvalidArgumentException;
 
@@ -18,8 +21,7 @@ class CartService
     private CartRepository $cartRepository,
     private CartItemRepository $cartItemRepository,
     private EntityManagerInterface $em,
-    private CartProductProviderInterface $priceProvider,
-    private StockAvailabilityInterface $stockChecker,
+    private QueryBusInterface $queryBus,
   ) {}
 
 
@@ -40,7 +42,8 @@ class CartService
 
   public function addItem(Cart $cart, int $productId, int $quantity = 1): void
   {
-    if (!$this->priceProvider->productExists($productId)) {
+    $productExists = $this->queryBus->query(new ProductExistsQuery($productId));
+    if (!$productExists) {
       throw new InvalidArgumentException("Product $productId not found");
     }
 
@@ -48,7 +51,10 @@ class CartService
     foreach ($cart->getItems() as $item) {
       if ($item->getProductId() === $productId) {
         $newQuantity = $item->getQuantity() + $quantity;
-        if (!$this->stockChecker->isAvailable($productId, $newQuantity)) {
+        $isAvailable = $this->queryBus->query(
+          new CheckStockAvailabilityQuery($productId, $newQuantity)
+        );
+        if (!$isAvailable) {
           throw new InsufficientStockException($productId, $newQuantity);
         }
         $item->setQuantity($newQuantity);
@@ -58,7 +64,10 @@ class CartService
     }
 
     // Nowa pozycja - sprawdź dostępność
-    if (!$this->stockChecker->isAvailable($productId, $quantity)) {
+    $isAvailable = $this->queryBus->query(
+      new CheckStockAvailabilityQuery($productId, $quantity)
+    );
+    if (!$isAvailable) {
       throw new InsufficientStockException($productId, $quantity);
     }
 
@@ -66,7 +75,9 @@ class CartService
     $item = new CartItem();
     $item->setProductId($productId);
     $item->setQuantity($quantity);
-    $item->setPriceAtAdd($this->priceProvider->getPrice($productId));
+
+    $price = $this->queryBus->query(new GetProductPriceQuery($productId));
+    $item->setPriceAtAdd($price);
 
     $cart->addItem($item);
     $this->em->flush();
@@ -111,7 +122,7 @@ class CartService
       $productIds[] = $item->getProductId();
     }
 
-    return $this->priceProvider->getProductNames($productIds);
+    return $this->queryBus->query(new GetProductNamesQuery($productIds));
   }
 
   public function updateItemQuantity(Cart $cart, int $productId, int $quantity): void
@@ -121,7 +132,10 @@ class CartService
         if ($quantity <= 0) {
           $cart->removeItem($item);
         } else {
-          if (!$this->stockChecker->isAvailable($productId, $quantity)) {
+          $isAvailable = $this->queryBus->query(
+            new CheckStockAvailabilityQuery($productId, $quantity)
+          );
+          if (!$isAvailable) {
             throw new InsufficientStockException($productId, $quantity);
           }
           $item->setQuantity($quantity);

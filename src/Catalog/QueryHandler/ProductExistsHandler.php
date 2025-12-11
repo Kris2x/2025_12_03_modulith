@@ -4,21 +4,19 @@ declare(strict_types=1);
 
 namespace App\Catalog\QueryHandler;
 
-use App\Shared\Query\Catalog\GetProductPriceQuery;
+use App\Shared\Query\Catalog\ProductExistsQuery;
 use App\Catalog\Repository\ProductRepository;
 use Symfony\Component\Messenger\Attribute\AsMessageHandler;
 
 #[AsMessageHandler(bus: 'query.bus')]
-final class GetProductPriceHandler
+final class ProductExistsHandler
 {
     public function __construct(
         private ProductRepository $productRepository,
     ) {}
 
-    public function __invoke(GetProductPriceQuery $query): ?string
+    public function __invoke(ProductExistsQuery $query): bool
     {
-        $product = $this->productRepository->find($query->productId);
-
-        return $product?->getPrice();
+        return $this->productRepository->find($query->productId) !== null;
     }
 }

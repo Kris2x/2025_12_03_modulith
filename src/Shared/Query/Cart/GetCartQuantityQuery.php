@@ -7,8 +7,6 @@ namespace App\Shared\Query\Cart;
 /**
  * Query: Pobierz ilość produktu w koszyku użytkownika.
  *
- * Odpowiednik Port/Adapter: CartQuantityInterface::getQuantityInCart()
- *
  * @example
  * $qty = $queryBus->query(new GetCartQuantityQuery(
  *     sessionId: 'abc123',

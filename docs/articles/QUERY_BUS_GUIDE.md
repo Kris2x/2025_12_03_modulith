@@ -4,7 +4,7 @@
 
 ## Czym jest Query Bus?
 
-Query Bus to wzorzec architektoniczny umożliwiający odpytywanie o dane między modułami bez bezpośrednich zależności. Jest alternatywą dla wzorca Port/Adapter.
+Query Bus to wzorzec architektoniczny umożliwiający odpytywanie o dane między modułami bez bezpośrednich zależności. Jest to **jedyny wzorzec komunikacji odczytu** używany w tym projekcie.
 
 ```
 ┌─────────────────┐         ┌─────────────────┐
@@ -20,25 +20,29 @@ Query Bus to wzorzec architektoniczny umożliwiający odpytywanie o dane między
 
 ---
 
-## Kiedy używać Query Bus?
+## Dlaczego Query Bus?
 
-### Query Bus jest lepszy gdy:
+### Zalety Query Bus
 
-| Sytuacja | Dlaczego Query Bus? |
-|----------|---------------------|
-| Wiele operacji cross-module | Mniej plików (2 vs 3 na operację) |
-| Potrzeba middleware | Cache, logging, metrics w jednym miejscu |
-| Projekt >50 tabel | Lepsza skalowalność |
-| Odpytywanie wielu modułów | Jeden spójny interfejs |
+| Cecha | Korzyść |
+|-------|---------|
+| **Jeden wzorzec** | Spójność w całym projekcie |
+| **Centralizacja** | Wszystkie Query w `Shared/Query/` |
+| **Middleware** | Cache, logging, metrics w jednym miejscu |
+| **Mniej plików** | 2 pliki na operację (Query + Handler) |
+| **Async-ready** | Łatwe przejście na asynchroniczne |
 
-### Port/Adapter jest lepszy gdy:
+### Porównanie ilości plików
 
-| Sytuacja | Dlaczego Port/Adapter? |
-|----------|------------------------|
-| Type-safety krytyczne | Pełne type-hints |
-| Mały projekt (<20 tabel) | Prostsza architektura |
-| IDE autocomplete ważne | Doskonałe wsparcie IDE |
-| Jasne granice kontraktów | Interfejs jako kontrakt |
+Dla jednej operacji cross-module (np. "pobierz cenę produktu"):
+
+```
+Query Bus:
+├── src/Shared/Query/Catalog/GetProductPriceQuery.php    # Kontrakt
+└── src/Catalog/QueryHandler/GetProductPriceHandler.php  # Implementacja
+
+Razem: 2 pliki
+```
 
 ---
 
@@ -125,8 +129,8 @@ use App\Shared\Query\Inventory\GetStockQuantityQuery;
 use App\Inventory\Service\StockService;
 use Symfony\Component\Messenger\Attribute\AsMessageHandler;
 
-#[AsMessageHandler]
-class GetStockQuantityHandler
+#[AsMessageHandler(bus: 'query.bus')]
+final class GetStockQuantityHandler
 {
     public function __construct(
         private StockService $stockService,
@@ -150,6 +154,10 @@ framework:
         buses:
             command.bus: ~
             query.bus: ~
+            event.bus:
+                default_middleware:
+                    enabled: true
+                    allow_no_handlers: true
 ```
 
 ```yaml
@@ -210,6 +218,8 @@ class ProductController extends AbstractController
 // src/Cart/Service/CartService.php
 use App\Shared\Bus\QueryBusInterface;
 use App\Shared\Query\Inventory\CheckStockAvailabilityQuery;
+use App\Shared\Query\Catalog\ProductExistsQuery;
+use App\Shared\Query\Catalog\GetProductPriceQuery;
 
 class CartService
 {
@@ -219,6 +229,12 @@ class CartService
 
     public function addItem(Cart $cart, int $productId, int $quantity): void
     {
+        // Sprawdź czy produkt istnieje
+        $exists = $this->queryBus->query(new ProductExistsQuery($productId));
+        if (!$exists) {
+            throw new InvalidArgumentException("Product $productId not found");
+        }
+
         // Sprawdź dostępność przez Query Bus
         $isAvailable = $this->queryBus->query(
             new CheckStockAvailabilityQuery($productId, $quantity)
@@ -227,6 +243,9 @@ class CartService
         if (!$isAvailable) {
             throw new InsufficientStockException($productId, $quantity);
         }
+
+        // Pobierz cenę
+        $price = $this->queryBus->query(new GetProductPriceQuery($productId));
 
         // ... reszta logiki
     }
@@ -237,21 +256,22 @@ class CartService
 
 ## Dostępne Query w projekcie
 
-### Inventory
+### Catalog (udostępnia)
+
+| Query | Parametry | Zwraca | Opis |
+|-------|-----------|--------|------|
+| `ProductExistsQuery` | `productId` | `bool` | Czy produkt istnieje |
+| `GetProductPriceQuery` | `productId` | `?string` | Cena produktu |
+| `GetProductNamesQuery` | `productIds[]` | `array<int,string>` | Nazwy produktów |
+
+### Inventory (udostępnia)
 
 | Query | Parametry | Zwraca | Opis |
 |-------|-----------|--------|------|
 | `GetStockQuantityQuery` | `productId` | `int` | Ilość na stanie |
 | `CheckStockAvailabilityQuery` | `productId`, `quantity` | `bool` | Czy dostępne |
 
-### Catalog
-
-| Query | Parametry | Zwraca | Opis |
-|-------|-----------|--------|------|
-| `GetProductPriceQuery` | `productId` | `?string` | Cena produktu |
-| `GetProductNamesQuery` | `productIds[]` | `array<int,string>` | Nazwy produktów |
-
-### Cart
+### Cart (udostępnia)
 
 | Query | Parametry | Zwraca | Opis |
 |-------|-----------|--------|------|
@@ -259,45 +279,42 @@ class CartService
 
 ---
 
-## Porównanie z Port/Adapter
-
-### Ta sama operacja - dwa podejścia:
-
-**Port/Adapter (3 pliki):**
+## Struktura plików
 
 ```
-src/Cart/Port/StockAvailabilityInterface.php    # Interfejs
-src/Inventory/Adapter/StockAvailabilityAdapter.php  # Implementacja
-config/services.yaml                            # Alias
+src/
+├── Shared/
+│   ├── Bus/
+│   │   ├── QueryBusInterface.php
+│   │   ├── QueryBus.php
+│   │   ├── EventBusInterface.php
+│   │   └── EventBus.php
+│   ├── Query/
+│   │   ├── Catalog/
+│   │   │   ├── ProductExistsQuery.php
+│   │   │   ├── GetProductPriceQuery.php
+│   │   │   └── GetProductNamesQuery.php
+│   │   ├── Inventory/
+│   │   │   ├── GetStockQuantityQuery.php
+│   │   │   └── CheckStockAvailabilityQuery.php
+│   │   └── Cart/
+│   │       └── GetCartQuantityQuery.php
+│   └── Event/
+│       ├── ProductCreatedEvent.php
+│       └── ProductDeletedEvent.php
+├── Catalog/
+│   └── QueryHandler/
+│       ├── ProductExistsHandler.php
+│       ├── GetProductPriceHandler.php
+│       └── GetProductNamesHandler.php
+├── Inventory/
+│   └── QueryHandler/
+│       ├── GetStockQuantityHandler.php
+│       └── CheckStockAvailabilityHandler.php
+└── Cart/
+    └── QueryHandler/
+        └── GetCartQuantityHandler.php
 ```
-
-```php
-// Użycie
-$this->stockAvailability->isAvailable($productId, $quantity);
-```
-
-**Query Bus (2 pliki):**
-
-```
-src/Shared/Query/Inventory/CheckStockAvailabilityQuery.php  # Query
-src/Inventory/QueryHandler/CheckStockAvailabilityHandler.php # Handler
-```
-
-```php
-// Użycie
-$this->queryBus->query(new CheckStockAvailabilityQuery($productId, $quantity));
-```
-
-### Tabela porównawcza
-
-| Aspekt | Port/Adapter | Query Bus |
-|--------|--------------|-----------|
-| Pliki na operację | 3 | 2 |
-| Type-safety wyniku | ✅ Pełna | ⚠️ `mixed` |
-| IDE autocomplete | ✅ Doskonałe | ⚠️ Ograniczone |
-| Middleware | ❌ Trudne | ✅ Natywne |
-| Centralizacja Query | ❌ Rozproszone | ✅ W Shared |
-| Debugowanie | ✅ Proste | ⚠️ Przez bus |
 
 ---
 
@@ -405,6 +422,7 @@ src/Shared/Query/
 │   ├── GetStockQuantityQuery.php
 │   └── CheckStockAvailabilityQuery.php
 ├── Catalog/            # Query obsługiwane przez Catalog
+│   ├── ProductExistsQuery.php
 │   ├── GetProductPriceQuery.php
 │   └── GetProductNamesQuery.php
 └── Cart/               # Query obsługiwane przez Cart
@@ -421,39 +439,23 @@ src/Inventory/QueryHandler/
 
 ### 5. Nie mieszaj Command i Query
 
-Query Bus jest tylko do odczytu. Operacje zmieniające stan powinny używać Command Bus lub Port/Adapter.
+Query Bus jest tylko do odczytu. Operacje zmieniające stan powinny używać Command Bus lub serwisów.
 
 ```php
 // ✅ Query - tylko odczyt
 $this->queryBus->query(new GetStockQuantityQuery($id));
 
-// ✅ Command - zmiana stanu (osobny bus)
-$this->commandBus->dispatch(new UpdateStockCommand($id, 10));
+// ✅ Command - zmiana stanu (osobny bus lub serwis)
+$this->productService->createProduct($data);
 ```
 
 ---
 
 ## Kiedy NIE używać Query Bus?
 
-1. **Operacje mutujące** - zmiany stanu powinny być przez Command Bus
-2. **Proste, lokalne zapytania** - bezpośrednio przez repozytorium
-3. **Bardzo małe projekty** - Port/Adapter wystarczy
-4. **Type-safety krytyczne** - Port/Adapter daje lepsze typy
-
----
-
-## Demo w projekcie
-
-Akcja `ProductController::compareApproaches()` demonstruje różnicę między Port/Adapter a Query Bus na żywym przykładzie:
-
-```
-/catalog/product/{id}/compare
-```
-
-Widok pokazuje:
-- Kod dla obu podejść
-- Wyniki (powinny być identyczne)
-- Porównanie zalet i wad
+1. **Operacje mutujące** - zmiany stanu powinny być przez serwisy lub Command Bus
+2. **Proste, lokalne zapytania** - bezpośrednio przez repozytorium w tym samym module
+3. **Type-safety krytyczne** - Query Bus zwraca `mixed`, rozważ wrappery z typami
 
 ---
 

@@ -8,25 +8,7 @@ use App\Shared\Query\Inventory\GetStockQuantityQuery;
 use App\Inventory\Service\StockService;
 use Symfony\Component\Messenger\Attribute\AsMessageHandler;
 
-/**
- * Handler dla GetStockQuantityQuery.
- *
- * Handlery są automatycznie rejestrowane przez Symfony Messenger
- * dzięki atrybutowi #[AsMessageHandler].
- *
- * Konwencja nazewnictwa:
- * - Query w Shared/Query/{Module}/
- * - Handler w {Module}/QueryHandler/
- *
- * Porównanie z Port/Adapter:
- * - Port/Adapter: StockInfoAdapter::getQuantity() w Inventory/Adapter/
- * - Query Bus: GetStockQuantityHandler w Inventory/QueryHandler/
- *
- * Handler jest w tym samym module co dane (Inventory),
- * ale Query jest w Shared - dzięki temu Cart/Catalog nie
- * importują niczego z Inventory.
- */
-#[AsMessageHandler]
+#[AsMessageHandler(bus: 'query.bus')]
 final class GetStockQuantityHandler
 {
     public function __construct(

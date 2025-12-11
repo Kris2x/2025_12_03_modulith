@@ -8,15 +8,7 @@ use App\Shared\Query\Catalog\GetProductNamesQuery;
 use App\Catalog\Repository\ProductRepository;
 use Symfony\Component\Messenger\Attribute\AsMessageHandler;
 
-/**
- * Handler dla GetProductNamesQuery.
- *
- * Pobiera nazwy produktów (batch operation).
- *
- * Przykład optymalizacji w Query Bus - jedno zapytanie
- * do bazy dla wielu produktów zamiast N zapytań.
- */
-#[AsMessageHandler]
+#[AsMessageHandler(bus: 'query.bus')]
 final class GetProductNamesHandler
 {
     public function __construct(

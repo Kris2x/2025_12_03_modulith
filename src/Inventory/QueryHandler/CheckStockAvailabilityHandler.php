@@ -8,17 +8,7 @@ use App\Shared\Query\Inventory\CheckStockAvailabilityQuery;
 use App\Inventory\Service\StockService;
 use Symfony\Component\Messenger\Attribute\AsMessageHandler;
 
-/**
- * Handler dla CheckStockAvailabilityQuery.
- *
- * Sprawdza czy żądana ilość produktu jest dostępna na stanie.
- *
- * Porównanie z Port/Adapter:
- * - Port: Cart/Port/StockAvailabilityInterface
- * - Adapter: Inventory/Adapter/StockAvailabilityAdapter
- * - Query Bus: ta klasa (jeden plik zamiast dwóch)
- */
-#[AsMessageHandler]
+#[AsMessageHandler(bus: 'query.bus')]
 final class CheckStockAvailabilityHandler
 {
     public function __construct(

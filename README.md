@@ -22,7 +22,7 @@ Projekt edukacyjny demonstrujący architekturę **modularnego monolitu** w Symfo
 |-------|-------------------|-------------------|--------------|
 | Deployment | Jeden artefakt | Jeden artefakt | Wiele artefaktów |
 | Granice modułów | Brak/rozmyte | Jasne, egzekwowane | Jasne (sieć) |
-| Komunikacja | Bezpośrednie wywołania | Bus/Interfejsy/Eventy | HTTP/Message Queue |
+| Komunikacja | Bezpośrednie wywołania | Bus/Eventy | HTTP/Message Queue |
 | Baza danych | Jedna, współdzielona | Jedna, ale tabele per moduł | Osobne per serwis |
 | Złożoność operacyjna | Niska | Niska | Wysoka |
 | Skalowalność | Ograniczona | Ograniczona | Wysoka |
@@ -41,32 +41,26 @@ Projekt edukacyjny demonstrujący architekturę **modularnego monolitu** w Symfo
 ```
 src/
 ├── Catalog/                    # Moduł katalogu produktów
-│   ├── Adapter/                # Implementacje interfejsów dla innych modułów
 │   ├── Controller/             # Warstwa prezentacji
 │   ├── Entity/                 # Encje Doctrine (model domeny)
 │   ├── Form/                   # Formularze Symfony
-│   ├── Port/                   # Interfejsy definiujące potrzeby modułu
 │   ├── QueryHandler/           # Handlery Query Bus
 │   ├── Repository/             # Dostęp do danych
 │   └── Service/                # Logika biznesowa
 │
 ├── Inventory/                  # Moduł magazynu
-│   ├── Adapter/                # Implementacje interfejsów dla innych modułów
 │   ├── Controller/
 │   ├── Entity/
 │   ├── EventHandler/           # Handlery eventów (Symfony Messenger)
-│   ├── Port/                   # Interfejsy definiujące potrzeby modułu
 │   ├── QueryHandler/           # Handlery Query Bus
 │   ├── Repository/
 │   └── Service/
 │
 ├── Cart/                       # Moduł koszyka
-│   ├── Adapter/                # Implementacje interfejsów dla innych modułów
 │   ├── Controller/
 │   ├── Entity/
 │   ├── EventHandler/           # Handlery eventów (Symfony Messenger)
 │   ├── Exception/              # Wyjątki domenowe
-│   ├── Port/                   # Interfejsy definiujące potrzeby modułu
 │   ├── QueryHandler/           # Handlery Query Bus
 │   ├── Repository/
 │   └── Service/
@@ -85,8 +79,14 @@ src/
     │   └── ProductDeletedEvent.php
     └── Query/                  # Definicje Query per moduł
         ├── Catalog/
+        │   ├── GetProductPriceQuery.php
+        │   ├── GetProductNamesQuery.php
+        │   └── ProductExistsQuery.php
         ├── Inventory/
+        │   ├── GetStockQuantityQuery.php
+        │   └── CheckStockAvailabilityQuery.php
         └── Cart/
+            └── GetCartQuantityQuery.php
 ```
 
 ### Dlaczego taka struktura?
@@ -96,7 +96,6 @@ Każdy moduł jest **samodzielną jednostką** z własnymi:
 - Repozytoriami (dostęp tylko do swoich tabel)
 - Serwisami (logika biznesowa)
 - Kontrolerami (API/widoki)
-- Portami/Adapterami (komunikacja z innymi modułami)
 - QueryHandlerami (obsługa zapytań z Query Bus)
 - EventHandlerami (reakcja na eventy)
 
@@ -119,8 +118,7 @@ Każdy moduł jest **samodzielną jednostką** z własnymi:
 **Kluczowe elementy:**
 - `ProductService` - logika CRUD dla produktów, emituje eventy przez `EventBusInterface`
 - `CategoryService` - logika CRUD dla kategorii
-- `GetProductPriceHandler`, `GetProductNamesHandler` - handlery Query Bus
-- Adaptery: `InventoryProductAdapter`, `CartProductAdapter`
+- QueryHandlery: `GetProductPriceHandler`, `GetProductNamesHandler`, `ProductExistsHandler`
 
 **Tabele:** `catalog_product`, `catalog_category`
 
@@ -137,9 +135,8 @@ Każdy moduł jest **samodzielną jednostką** z własnymi:
 
 **Kluczowe elementy:**
 - `StockService` - logika zarządzania stanami
-- `ProductCreatedHandler`, `ProductDeletedHandler` - handlery eventów (Messenger)
-- `GetStockQuantityHandler`, `CheckStockAvailabilityHandler` - handlery Query Bus
-- Adaptery: `StockAvailabilityAdapter`, `StockInfoAdapter`
+- EventHandlery: `ProductCreatedHandler`, `ProductDeletedHandler`
+- QueryHandlery: `GetStockQuantityHandler`, `CheckStockAvailabilityHandler`
 
 **Ważne:** `StockItem.productId` to **int**, NIE relacja Doctrine! Moduły nie mają relacji bazodanowych między sobą.
 
@@ -158,10 +155,9 @@ Każdy moduł jest **samodzielną jednostką** z własnymi:
 - `CartItem` - pozycja w koszyku (productId, quantity, priceAtAdd)
 
 **Kluczowe elementy:**
-- `CartService` - logika koszyka (add, remove, clear, update)
-- `ProductDeletedHandler` - handler eventu usunięcia produktu (Messenger)
-- `GetCartQuantityHandler` - handler Query Bus
-- `CartQuantityAdapter` - adapter dla Catalog
+- `CartService` - logika koszyka (add, remove, clear, update), używa `QueryBusInterface`
+- EventHandlery: `ProductDeletedHandler`
+- QueryHandlery: `GetCartQuantityHandler`
 
 **Ważne:** `CartItem.priceAtAdd` przechowuje cenę z momentu dodania - cena może się zmienić, ale w koszyku zostaje stara.
 
@@ -188,7 +184,8 @@ Projekt używa **Symfony Messenger** jako zunifikowanego mechanizmu komunikacji:
 │  │ danych      │        │ o zmianach   │                       │
 │  └─────────────┘        └─────────────┘                        │
 │                                                                 │
-│  #[AsMessageHandler]    #[AsMessageHandler(bus: 'event.bus')]  │
+│  #[AsMessageHandler(bus: 'query.bus')]                         │
+│  #[AsMessageHandler(bus: 'event.bus')]                         │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -206,7 +203,7 @@ final class GetStockQuantityHandler
 {
     public function __invoke(GetStockQuantityQuery $query): int
     {
-        return $this->repository->getQuantity($query->productId);
+        return $this->stockService->getQuantity($query->productId);
     }
 }
 
@@ -247,60 +244,7 @@ final class ProductCreatedHandler
 
 ---
 
-### 2. Ports & Adapters (Hexagonal Architecture)
-
-Alternatywa dla Query Bus z pełnym type-safety:
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                         INVENTORY                               │
-│  ┌─────────────────────────────────────────────────────────┐   │
-│  │                    CORE (Service)                        │   │
-│  │                                                          │   │
-│  │   StockService                                           │   │
-│  │      │                                                   │   │
-│  │      │ potrzebuje danych o produktach                    │   │
-│  │      ▼                                                   │   │
-│  │   ProductCatalogInterface  ◄─── PORT (interfejs)         │   │
-│  │                                                          │   │
-│  └──────────────────────────────────────────────────────────┘   │
-│                            ▲                                    │
-└────────────────────────────│────────────────────────────────────┘
-                             │
-                             │ implementuje
-                             │
-┌────────────────────────────│────────────────────────────────────┐
-│                         CATALOG                                 │
-│                            │                                    │
-│   InventoryProductAdapter ◄─── ADAPTER (implementacja)          │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-**Port (interfejs)** - definiuje CO moduł potrzebuje:
-```php
-// src/Inventory/Port/ProductCatalogInterface.php
-interface ProductCatalogInterface
-{
-    public function getProductNames(array $productIds): array;
-}
-```
-
-**Adapter (implementacja)** - dostarcza JAK to zrealizować:
-```php
-// src/Catalog/Adapter/InventoryProductAdapter.php
-class InventoryProductAdapter implements ProductCatalogInterface
-{
-    public function getProductNames(array $productIds): array
-    {
-        // implementacja używająca ProductRepository
-    }
-}
-```
-
----
-
-### 3. SharedKernel Pattern
+### 2. SharedKernel Pattern
 
 Eventy i Query są współdzielone przez wszystkie moduły:
 
@@ -317,7 +261,8 @@ src/Shared/
 └── Query/                  # Kontrakty query
     ├── Catalog/
     │   ├── GetProductPriceQuery.php
-    │   └── GetProductNamesQuery.php
+    │   ├── GetProductNamesQuery.php
+    │   └── ProductExistsQuery.php
     ├── Inventory/
     │   ├── GetStockQuantityQuery.php
     │   └── CheckStockAvailabilityQuery.php
@@ -340,7 +285,6 @@ src/Shared/
 |---------|--------------|----------|
 | **Query Bus** | Potrzebujesz danych synchronicznie | `GetStockQuantityQuery` → Inventory |
 | **Event Bus** | Powiadomienie o zmianie (fire & forget) | `ProductCreatedEvent` → Inventory, Cart |
-| **Port/Adapter** | Type-safety krytyczne | `CartProductProviderInterface` |
 | **Przez ID** | Referencja do encji innego modułu | CartItem.productId (int) |
 
 ### Diagram przepływu
@@ -365,7 +309,7 @@ src/Shared/
     │              │ │              │ │  (productId) │
     │  EventBus ───┼─┼──► Handlers  │ │              │
     │  QueryHandlers◄┼──── QueryBus │ │  Handlers ◄──┤
-    │              │ │              │ │  QueryHandlers│
+    │              │ │  QueryHandlers│ │  QueryHandlers│
     └──────────────┘ └──────────────┘ └──────────────┘
 ```
 
@@ -379,9 +323,7 @@ src/Shared/
 - Import **query** z `Shared/Query/`
 - Użycie `QueryBusInterface` dla cross-module queries
 - Użycie `EventBusInterface` dla publikacji eventów
-- Import **interfejsów (portów)** z innych modułów
 - Przechowywanie **ID** encji z innego modułu (jako int)
-- Implementacja interfejsów innych modułów w adapterach
 
 ### ZABRONIONE
 
@@ -509,13 +451,11 @@ php bin/console cache:clear
 - [docs/PLAN_MODULARNY_MONOLIT.md](docs/PLAN_MODULARNY_MONOLIT.md) - Plan i postępy
 - [docs/CHANGELOG.md](docs/CHANGELOG.md) - Historia zmian architektonicznych
 - [docs/modules/](docs/modules/) - Dokumentacja modułów
-- [docs/articles/QUERY_BUS_GUIDE.md](docs/articles/QUERY_BUS_GUIDE.md) - Poradnik Query/Event Bus
-- [docs/articles/INTER_MODULE_COMMUNICATION_IN_DDD.md](docs/articles/INTER_MODULE_COMMUNICATION_IN_DDD.md) - Komunikacja w DDD
+- [docs/diagrams/](docs/diagrams/) - Diagramy architektury
 - [FUTURE_IMPROVEMENTS.md](FUTURE_IMPROVEMENTS.md) - Planowane ulepszenia
 
 ## Materiały
 
 - [Modular Monolith Primer](https://www.kamilgrzybek.com/design/modular-monolith-primer/)
 - [Symfony Messenger](https://symfony.com/doc/current/messenger.html)
-- [Hexagonal Architecture](https://alistair.cockburn.us/hexagonal-architecture/)
 - [Domain-Driven Design](https://www.domainlanguage.com/ddd/)

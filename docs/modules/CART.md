@@ -8,8 +8,6 @@ Moduł **Cart** odpowiada za zarządzanie koszykiem zakupowym. Przechowuje produ
 
 ```
 src/Cart/
-├── Adapter/
-│   └── CartQuantityAdapter.php           # Adapter dla Catalog (ilość w koszyku)
 ├── Controller/
 │   └── CartController.php                # Operacje na koszyku
 ├── Entity/
@@ -19,9 +17,6 @@ src/Cart/
 │   └── ProductDeletedHandler.php         # Reaguje na usunięcie produktu
 ├── Exception/
 │   └── InsufficientStockException.php    # Wyjątek braku towaru
-├── Port/
-│   ├── CartProductProviderInterface.php  # Interfejs do pobierania danych produktów
-│   └── StockAvailabilityInterface.php    # Interfejs do sprawdzania dostępności
 ├── QueryHandler/
 │   └── GetCartQuantityHandler.php        # Handler dla Query Bus
 ├── Repository/
@@ -102,8 +97,7 @@ Główny serwis do zarządzania koszykiem.
 - `CartRepository` - dostęp do koszyków
 - `CartItemRepository` - dostęp do pozycji
 - `EntityManagerInterface` - operacje na bazie
-- `CartProductProviderInterface` - **port** do pobierania danych produktów (Catalog)
-- `StockAvailabilityInterface` - **port** do sprawdzania dostępności (Inventory)
+- `QueryBusInterface` - pobieranie danych z innych modułów
 
 **Metody:**
 
@@ -119,13 +113,14 @@ Główny serwis do zarządzania koszykiem.
 | `getProductNames(Cart)` | Pobiera nazwy produktów (batch) |
 | `removeItemsByProductId(int $productId)` | Usuwa pozycje po usunięciu produktu |
 
-**Logika dodawania produktu:**
+**Logika dodawania produktu (z Query Bus):**
 
 ```php
 public function addItem(Cart $cart, int $productId, int $quantity = 1): void
 {
     // 1. Walidacja - czy produkt istnieje?
-    if (!$this->priceProvider->productExists($productId)) {
+    $exists = $this->queryBus->query(new ProductExistsQuery($productId));
+    if (!$exists) {
         throw new InvalidArgumentException("Product $productId not found");
     }
 
@@ -139,8 +134,11 @@ public function addItem(Cart $cart, int $productId, int $quantity = 1): void
     }
     $totalQuantity = $currentQuantity + $quantity;
 
-    // 3. Walidacja dostępności w magazynie
-    if (!$this->stockAvailability->isAvailable($productId, $totalQuantity)) {
+    // 3. Walidacja dostępności w magazynie przez Query Bus
+    $isAvailable = $this->queryBus->query(
+        new CheckStockAvailabilityQuery($productId, $totalQuantity)
+    );
+    if (!$isAvailable) {
         throw new InsufficientStockException($productId, $totalQuantity);
     }
 
@@ -153,98 +151,18 @@ public function addItem(Cart $cart, int $productId, int $quantity = 1): void
         }
     }
 
-    // 5. Nowa pozycja - zapisz cenę z momentu dodania
+    // 5. Nowa pozycja - pobierz cenę przez Query Bus
+    $price = $this->queryBus->query(new GetProductPriceQuery($productId));
+
     $item = new CartItem();
     $item->setProductId($productId);
     $item->setQuantity($quantity);
-    $item->setPriceAtAdd($this->priceProvider->getPrice($productId));
+    $item->setPriceAtAdd($price);
 
     $cart->addItem($item);
     $this->em->flush();
 }
 ```
-
----
-
-## Porty (interfejsy wejściowe)
-
-### CartProductProviderInterface
-
-Interfejs definiujący co moduł Cart potrzebuje od modułu Catalog.
-
-```php
-namespace App\Cart\Port;
-
-interface CartProductProviderInterface
-{
-    public function getPrice(int $productId): string;
-
-    public function productExists(int $productId): bool;
-
-    public function getProductName(int $productId): string;
-
-    /**
-     * @param int[] $productIds
-     * @return array<int, string> productId => name
-     */
-    public function getProductNames(array $productIds): array;
-}
-```
-
-**Implementacja:** `Catalog\Adapter\CartProductAdapter`
-
-### StockAvailabilityInterface
-
-Interfejs do sprawdzania dostępności produktów w magazynie.
-
-```php
-namespace App\Cart\Port;
-
-interface StockAvailabilityInterface
-{
-    /**
-     * Sprawdza czy żądana ilość produktu jest dostępna
-     */
-    public function isAvailable(int $productId, int $quantity): bool;
-
-    /**
-     * Zwraca dostępną ilość produktu
-     */
-    public function getAvailableQuantity(int $productId): int;
-}
-```
-
-**Implementacja:** `Inventory\Adapter\StockAvailabilityAdapter`
-
-**Dlaczego osobny port dla dostępności?**
-- **Interface Segregation** - Cart potrzebuje tylko sprawdzenia dostępności, nie pełnego API magazynu
-- **Separacja odpowiedzialności** - dane produktów z Catalog, dostępność z Inventory
-- **Testowalność** - łatwo mockować w testach
-
----
-
-## Adapter (interfejs wyjściowy)
-
-### CartQuantityAdapter
-
-Adapter implementujący port `CartQuantityInterface` z modułu Catalog.
-
-```php
-namespace App\Cart\Adapter;
-
-use App\Catalog\Port\CartQuantityInterface;
-
-class CartQuantityAdapter implements CartQuantityInterface
-{
-    public function getQuantityInCart(int $productId, string $sessionId): int
-    {
-        // Zwraca ilość danego produktu w koszyku użytkownika
-    }
-}
-```
-
-**Dlaczego Cart eksportuje dane?**
-Moduł Catalog wyświetla na stronie produktu ile sztuk użytkownik ma już w koszyku. Cart dostarcza tę informację przez adapter.
 
 ---
 
@@ -274,6 +192,56 @@ final class ProductDeletedHandler
 
 **Dlaczego?**
 Bez tego handlera, po usunięciu produktu w koszykach zostałyby "osierocone" pozycje wyświetlające "Nieznany produkt".
+
+---
+
+## Query Handlers
+
+Moduł Cart udostępnia dane innym modułom przez Query Bus:
+
+### GetCartQuantityHandler
+
+Zwraca ilość danego produktu w koszyku użytkownika.
+
+```php
+#[AsMessageHandler(bus: 'query.bus')]
+final class GetCartQuantityHandler
+{
+    public function __construct(
+        private CartItemRepository $cartItemRepository,
+    ) {}
+
+    public function __invoke(GetCartQuantityQuery $query): int
+    {
+        return $this->cartItemRepository->getQuantityForProduct(
+            $query->productId,
+            $query->sessionId
+        );
+    }
+}
+```
+
+**Query (w Shared):**
+
+```php
+// src/Shared/Query/Cart/GetCartQuantityQuery.php
+readonly class GetCartQuantityQuery
+{
+    public function __construct(
+        public int $productId,
+        public string $sessionId,
+    ) {}
+}
+```
+
+**Użycie w innych modułach:**
+
+```php
+// Catalog wyświetla ile sztuk jest już w koszyku
+$cartQuantity = $this->queryBus->query(
+    new GetCartQuantityQuery($productId, $sessionId)
+);
+```
 
 ---
 
@@ -320,34 +288,33 @@ public function index(Request $request): Response
 
 ## Integracja z innymi modułami
 
-### Pobiera dane z (konsumuje)
+### Pobiera dane przez Query Bus
 
 ```
-Cart ──[CartProductProviderInterface]──► Catalog
-     ──[StockAvailabilityInterface]───► Inventory
+Cart ──[ProductExistsQuery]────────────► Catalog
+     ──[GetProductPriceQuery]──────────► Catalog
+     ──[GetProductNamesQuery]──────────► Catalog
+     ──[CheckStockAvailabilityQuery]───► Inventory
 ```
 
-Moduł Cart używa portów do:
-- **CartProductProviderInterface** (Catalog):
-  - Sprawdzenia czy produkt istnieje
-  - Pobrania aktualnej ceny przy dodawaniu
-  - Pobrania nazw produktów do wyświetlenia
-- **StockAvailabilityInterface** (Inventory):
-  - Walidacji dostępności przed dodaniem do koszyka
-  - Sprawdzenia ile można jeszcze dodać
+Moduł Cart używa Query Bus do:
+- **ProductExistsQuery** - sprawdzenie czy produkt istnieje
+- **GetProductPriceQuery** - pobranie aktualnej ceny przy dodawaniu
+- **GetProductNamesQuery** - pobranie nazw produktów do wyświetlenia
+- **CheckStockAvailabilityQuery** - walidacja dostępności przed dodaniem
 
-### Udostępnia dane (eksportuje)
+### Udostępnia dane przez Query Bus
 
 ```
-Catalog ──[CartQuantityInterface]──► Cart
+Catalog ──[GetCartQuantityQuery]──► Cart
 ```
 
-Moduł Cart implementuje adapter `CartQuantityAdapter` dla Catalog, umożliwiając wyświetlenie ilości produktu w koszyku na stronie produktu.
+Moduł Cart udostępnia `GetCartQuantityHandler` umożliwiający wyświetlenie ilości produktu w koszyku na stronie produktu.
 
 ### Reaguje na eventy (nasłuchuje)
 
 ```
-Catalog ──[ProductDeletedEvent]──► Cart
+Shared ──[ProductDeletedEvent]──► Cart
 ```
 
 Gdy produkt zostaje usunięty, Cart automatycznie usuwa odpowiednie pozycje z wszystkich koszyków.
@@ -377,33 +344,22 @@ templates/cart/
 │  ┌─────────────────────────────────────────────────────┐   │
 │  │  Controller ──► CartService ──► Repository          │   │
 │  │                      │                               │   │
-│  │                      │ uses                          │   │
-│  │                      ▼                               │   │
-│  │        CartProductProviderInterface ◄─── PORT        │   │
-│  │        StockAvailabilityInterface   ◄─── PORT        │   │
+│  │                      │ uses QueryBusInterface for:   │   │
+│  │                      │   - ProductExistsQuery        │   │
+│  │                      │   - GetProductPriceQuery      │   │
+│  │                      │   - GetProductNamesQuery      │   │
+│  │                      │   - CheckStockAvailabilityQuery│  │
 │  └─────────────────────────────────────────────────────┘   │
 │                                                             │
 │  ┌─────────────────────────────────────────────────────┐   │
-│  │  ProductDeletedSubscriber                             │   │
-│  │  listens: ProductDeletedEvent (from Shared)           │   │
+│  │  EventHandler (nasłuchuje Shared/Event/)            │   │
+│  │  - ProductDeletedHandler (removes CartItems)        │   │
 │  └─────────────────────────────────────────────────────┘   │
 │                                                             │
 │  ┌─────────────────────────────────────────────────────┐   │
-│  │  CartQuantityAdapter                                   │   │
-│  │  implements: CartQuantityInterface (for Catalog)       │   │
+│  │  QueryHandlers (udostępnia dane)                    │   │
+│  │  - GetCartQuantityHandler                           │   │
 │  └─────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────┘
-                           ▲
-                           │ implements
-┌──────────────────────────│──────────────────────────────────┐
-│                       CATALOG                               │
-│                  CartProductAdapter                         │
-└─────────────────────────────────────────────────────────────┘
-                           ▲
-                           │ implements
-┌──────────────────────────│──────────────────────────────────┐
-│                      INVENTORY                              │
-│                StockAvailabilityAdapter                     │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -422,9 +378,16 @@ Cena produktu może się zmienić, ale w koszyku zostaje cena z momentu dodania.
 - Można usunąć produkt bez naruszania integralności koszyka
 - Łatwiejsza migracja do mikroserwisów w przyszłości
 
-### 3. Batch loading nazw produktów
+### 3. Query Bus dla danych między modułami
 
-Zamiast pobierać nazwę każdego produktu osobno (N+1 problem), `getProductNames()` pobiera wszystkie naraz w jednym zapytaniu SQL.
+Cart pobiera wszystkie dane z innych modułów przez Query Bus:
+- Query definiowane w `Shared/Query/`
+- Handlery w odpowiednich modułach
+- Jeden wzorzec dla całego projektu
+
+### 4. Batch loading nazw produktów
+
+Zamiast pobierać nazwę każdego produktu osobno (N+1 problem), `GetProductNamesQuery` pobiera wszystkie naraz w jednym zapytaniu SQL.
 
 ---
 
@@ -481,33 +444,12 @@ public function add(Request $request, int $productId): Response
 
 ---
 
-## Query Bus (alternatywa)
+## Przyszłe rozszerzenia
 
-Moduł Cart udostępnia również handler dla Query Bus:
+Moduł jest przygotowany na rozszerzenia:
 
-### GetCartQuantityHandler
-
-```php
-namespace App\Cart\QueryHandler;
-
-use App\Shared\Query\Cart\GetCartQuantityQuery;
-
-class GetCartQuantityHandler
-{
-    public function __invoke(GetCartQuantityQuery $query): int
-    {
-        // Zwraca ilość produktu w koszyku użytkownika
-        return $this->cartItemRepository->getQuantityForProduct(
-            $query->productId,
-            $query->sessionId
-        );
-    }
-}
-```
-
-**Użycie:**
-```php
-$quantity = $this->queryBus->query(new GetCartQuantityQuery($productId, $sessionId));
-```
-
-Więcej o Query Bus w [docs/articles/QUERY_BUS_GUIDE.md](../articles/QUERY_BUS_GUIDE.md).
+1. **Rezerwacja stock'u** przy dodaniu do koszyka
+2. **Konwersja do zamówienia** z modułem Order
+3. **Koszyk zalogowanego użytkownika** (migracja z sessionId na userId)
+4. **Zapisane koszyki** - możliwość powrotu do porzuconego koszyka
+5. **Kody promocyjne** - rabaty na poziomie koszyka

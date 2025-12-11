@@ -8,17 +8,7 @@ use App\Shared\Query\Cart\GetCartQuantityQuery;
 use App\Cart\Repository\CartRepository;
 use Symfony\Component\Messenger\Attribute\AsMessageHandler;
 
-/**
- * Handler dla GetCartQuantityQuery.
- *
- * Pobiera ilość danego produktu w koszyku użytkownika.
- *
- * Porównanie z Port/Adapter:
- * - Port: Catalog/Port/CartQuantityInterface
- * - Adapter: Cart/Adapter/CartQuantityAdapter
- * - Query Bus: ta klasa
- */
-#[AsMessageHandler]
+#[AsMessageHandler(bus: 'query.bus')]
 final class GetCartQuantityHandler
 {
     public function __construct(

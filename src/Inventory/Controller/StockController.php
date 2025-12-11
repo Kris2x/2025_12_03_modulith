@@ -4,9 +4,10 @@ namespace App\Inventory\Controller;
 
 use App\Inventory\Entity\StockItem;
 use App\Inventory\Form\StockItemType;
-use App\Inventory\Port\ProductCatalogInterface;
 use App\Inventory\Repository\StockItemRepository;
 use App\Inventory\Service\StockService;
+use App\Shared\Bus\QueryBusInterface;
+use App\Shared\Query\Catalog\GetProductNamesQuery;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -18,7 +19,7 @@ class StockController extends AbstractController
   public function __construct(
     private StockService $stockService,
     private StockItemRepository $stockItemRepository,
-    private ProductCatalogInterface $productCatalog,
+    private QueryBusInterface $queryBus,
   ) {}
 
   #[Route('', name: 'index', methods: ['GET'])]
@@ -31,7 +32,7 @@ class StockController extends AbstractController
       $stockItems
     );
 
-    $productNames = $this->productCatalog->getProductNames($productIds);
+    $productNames = $this->queryBus->query(new GetProductNamesQuery($productIds));
 
     return $this->render('inventory/stock/index.html.twig', [
       'stockItems' => $stockItems,
@@ -53,7 +54,9 @@ class StockController extends AbstractController
       return $this->redirectToRoute('inventory_stock_index');
     }
 
-    $productNames = $this->productCatalog->getProductNames([$stockItem->getProductId()]);
+    $productNames = $this->queryBus->query(
+      new GetProductNamesQuery([$stockItem->getProductId()])
+    );
     $productName = $productNames[$stockItem->getProductId()] ?? 'Nieznany';
 
     return $this->render('inventory/stock/edit.html.twig', [
